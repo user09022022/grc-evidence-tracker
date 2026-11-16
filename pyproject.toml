@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "grc-evidence-tracker"
+version = "0.1.0"
+description = "CLI tool for tracking audit evidence requests for ISO 27001 / SOC 2 engagements"
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+authors = [
+    { name = "Giovan Alarcon Lancheros" },
+]
+
+[project.scripts]
+grc-tracker = "grc_tracker.cli:main"
+
+[tool.setuptools]
+packages = ["grc_tracker"]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
