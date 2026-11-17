@@ -5,7 +5,16 @@ from datetime import date
 import pytest
 
 from grc_tracker import core, report, store
-from grc_tracker.controls_data import CONTROLS, THEMES
+from grc_tracker.controls_data import (
+    CONTROLS,
+    FRAMEWORKS,
+    SOC2_CONTROLS,
+    SOC2_THEMES,
+    THEMES,
+    controls_by_id,
+    controls_for,
+    themes_for,
+)
 
 TODAY = date(2026, 11, 16)
 
@@ -71,6 +80,42 @@ def test_catalogue_ids_are_unique():
     assert len(ids) == len(set(ids))
 
 
+# --- SOC 2 catalogue (v0.2) ----------------------------------------------
+
+def test_soc2_catalogue_covers_cc1_to_cc9():
+    assert len(SOC2_CONTROLS) == 33
+    series = {c["id"].split(".")[0] for c in SOC2_CONTROLS}
+    assert series == {f"CC{i}" for i in range(1, 10)}
+
+
+def test_soc2_catalogue_spans_all_nine_categories():
+    assert {c["theme"] for c in SOC2_CONTROLS} == set(SOC2_THEMES)
+    assert len(SOC2_THEMES) == 9
+
+
+def test_soc2_catalogue_ids_are_unique_and_framework_tagged():
+    ids = [c["id"] for c in SOC2_CONTROLS]
+    assert len(ids) == len(set(ids))
+    assert all(c["framework"] == "soc2" for c in SOC2_CONTROLS)
+    assert all(c["framework"] == "iso27001" for c in CONTROLS)
+
+
+def test_catalogues_are_separate_and_lookups_are_scoped():
+    assert FRAMEWORKS == ("iso27001", "soc2")
+    assert controls_for("iso27001") == CONTROLS
+    assert controls_for("soc2") == SOC2_CONTROLS
+    assert "CC6.1" in controls_by_id("soc2")
+    assert "CC6.1" not in controls_by_id("iso27001")
+    assert "A.8.13" in controls_by_id("iso27001")
+    assert "A.8.13" not in controls_by_id("soc2")
+    # The merged lookup resolves both, for reports over mixed stores.
+    assert "CC6.1" in controls_by_id()
+    assert "A.8.13" in controls_by_id()
+    assert themes_for("soc2") == SOC2_THEMES
+    with pytest.raises(ValueError):
+        controls_for("nist")
+
+
 # --- Adding evidence -----------------------------------------------------
 
 def test_add_evidence_assigns_incrementing_ids(populated_store):
@@ -103,6 +148,43 @@ def test_add_evidence_rejects_invalid_date(empty_store):
     with pytest.raises(ValueError):
         core.add_evidence(
             empty_store, "A.7.2", "Badge access logs", "Facilities", "Dec 15",
+        )
+
+
+def test_add_evidence_defaults_to_iso27001_framework(empty_store):
+    item = core.add_evidence(
+        empty_store, "A.7.2", "Badge access logs", "Facilities", "2026-12-15",
+    )
+    assert item["framework"] == "iso27001"
+
+
+def test_add_evidence_soc2_records_framework(empty_store):
+    item = core.add_evidence(
+        empty_store, "CC6.1", "Access control matrix", "IT Operations",
+        "2026-12-15", framework="soc2",
+    )
+    assert item["framework"] == "soc2"
+    assert item["control_id"] == "CC6.1"
+
+
+def test_add_evidence_rejects_control_from_other_framework(empty_store):
+    with pytest.raises(ValueError):
+        core.add_evidence(
+            empty_store, "A.8.13", "Backup results", "IT Operations",
+            "2026-12-15", framework="soc2",
+        )
+    with pytest.raises(ValueError):
+        core.add_evidence(
+            empty_store, "CC6.1", "Access matrix", "IT Operations",
+            "2026-12-15", framework="iso27001",
+        )
+
+
+def test_add_evidence_rejects_unknown_framework(empty_store):
+    with pytest.raises(ValueError):
+        core.add_evidence(
+            empty_store, "CC6.1", "Access matrix", "IT Operations",
+            "2026-12-15", framework="nist",
         )
 
 
@@ -165,6 +247,42 @@ def test_report_csv_contents(tmp_path, populated_store):
         line for line in text.splitlines() if "Approved information" in line
     )
     assert verified_line.rstrip().endswith(",no")
+
+
+def test_report_csv_includes_framework_for_soc2_items(tmp_path, empty_store):
+    core.add_evidence(
+        empty_store, "CC7.4", "Incident response plan", "IT Operations",
+        "2026-11-10", framework="soc2",
+    )
+    core.add_evidence(
+        empty_store, "A.5.24", "Incident management plan", "CISO Office",
+        "2026-11-10",
+    )
+    path = str(tmp_path / "report.csv")
+    report.write_csv(empty_store, path, today=TODAY)
+    text = open(path, encoding="utf-8").read()
+    assert "id,framework,control_id,control_title" in text
+    soc2_line = next(line for line in text.splitlines() if "CC7.4" in line)
+    assert ",soc2,CC7.4," in soc2_line
+    assert "Response to security incidents" in soc2_line
+    iso_line = next(line for line in text.splitlines() if "A.5.24" in line)
+    assert ",iso27001,A.5.24," in iso_line
+
+
+def test_legacy_item_without_framework_still_reports(tmp_path):
+    # Stores written by v0.1 have no "framework" key on their items.
+    legacy = store.new_store()
+    legacy["evidence"].append({
+        "id": 1, "control_id": "A.8.13",
+        "title": "Backup restore test results", "owner": "IT Operations",
+        "due_date": "2026-11-10", "status": "requested",
+        "created": "2026-11-16",
+    })
+    assert core.item_framework(legacy["evidence"][0]) == "iso27001"
+    path = str(tmp_path / "report.csv")
+    report.write_csv(legacy, path, today=TODAY)
+    text = open(path, encoding="utf-8").read()
+    assert ",iso27001,A.8.13," in text
 
 
 def test_report_html_contents(tmp_path, populated_store):

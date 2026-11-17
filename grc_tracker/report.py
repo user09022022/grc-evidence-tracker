@@ -5,10 +5,10 @@ import html
 from datetime import date
 
 from .controls_data import CONTROLS_BY_ID
-from .core import is_overdue, overdue_items, status_counts
+from .core import is_overdue, item_framework, overdue_items, status_counts
 
 CSV_FIELDS = [
-    "id", "control_id", "control_title", "title", "owner",
+    "id", "framework", "control_id", "control_title", "title", "owner",
     "due_date", "status", "overdue",
 ]
 
@@ -22,6 +22,7 @@ def write_csv(store, path, today=None):
         for item in store["evidence"]:
             writer.writerow({
                 "id": item["id"],
+                "framework": item_framework(item),
                 "control_id": item["control_id"],
                 "control_title": CONTROLS_BY_ID[item["control_id"]]["title"],
                 "title": item["title"],
@@ -47,7 +48,7 @@ def write_html(store, path, today=None):
         overdue_rows = "\n".join(
             "      <tr>"
             f"<td>{item['id']}</td>"
-            f"<td>{html.escape(item['control_id'])}</td>"
+            f"<td>{html.escape(item_framework(item))}/{html.escape(item['control_id'])}</td>"
             f"<td>{html.escape(item['title'])}</td>"
             f"<td>{html.escape(item['owner'])}</td>"
             f"<td>{html.escape(item['due_date'])}</td>"

@@ -6,8 +6,13 @@ import sys
 from datetime import date
 
 from . import report as report_mod
-from .controls_data import CONTROLS, THEMES
-from .core import STATUSES, add_evidence, is_overdue, status_counts
+from .controls_data import (
+    DEFAULT_FRAMEWORK,
+    FRAMEWORKS,
+    controls_for,
+    themes_for,
+)
+from .core import STATUSES, add_evidence, is_overdue, item_framework, status_counts
 from .store import DEFAULT_PATH, init_store, load_store, save_store
 
 
@@ -26,12 +31,21 @@ def build_parser():
 
     p_controls = sub.add_parser("controls", help="list bundled controls")
     p_controls.add_argument(
-        "--theme", choices=THEMES, default=None,
-        help="only show controls from this theme",
+        "--framework", choices=FRAMEWORKS, default=DEFAULT_FRAMEWORK,
+        help=f"control catalogue to list (default: {DEFAULT_FRAMEWORK})",
+    )
+    p_controls.add_argument(
+        "--theme", default=None,
+        help="only show controls from this theme/category "
+             "(valid values depend on --framework)",
     )
 
     p_add = sub.add_parser("add-evidence", help="record an evidence request")
-    p_add.add_argument("--control", required=True, help="control id, e.g. A.8.13")
+    p_add.add_argument(
+        "--framework", choices=FRAMEWORKS, default=DEFAULT_FRAMEWORK,
+        help=f"framework the control belongs to (default: {DEFAULT_FRAMEWORK})",
+    )
+    p_add.add_argument("--control", required=True, help="control id, e.g. A.8.13 or CC6.1")
     p_add.add_argument("--title", required=True, help="evidence item title")
     p_add.add_argument("--owner", required=True, help="person/team who must provide it")
     p_add.add_argument("--due", required=True, help="due date, YYYY-MM-DD")
@@ -61,7 +75,14 @@ def cmd_init(args):
 
 
 def cmd_controls(args):
-    controls = [c for c in CONTROLS if args.theme is None or c["theme"] == args.theme]
+    themes = themes_for(args.framework)
+    if args.theme is not None and args.theme not in themes:
+        raise ValueError(
+            f"Unknown theme {args.theme!r} for framework {args.framework!r}: "
+            f"expected one of {', '.join(themes)}."
+        )
+    catalogue = controls_for(args.framework)
+    controls = [c for c in catalogue if args.theme is None or c["theme"] == args.theme]
     current_theme = None
     for control in controls:
         if control["theme"] != current_theme:
@@ -69,7 +90,7 @@ def cmd_controls(args):
             print(f"\n{current_theme}")
             print("-" * len(current_theme))
         print(f"  {control['id']:<8} {control['title']}")
-    print(f"\n{len(controls)} control(s)")
+    print(f"\n{len(controls)} control(s) [{args.framework}]")
     return 0
 
 
@@ -82,10 +103,12 @@ def cmd_add_evidence(args):
         owner=args.owner,
         due_date=args.due,
         status=args.status,
+        framework=args.framework,
     )
     save_store(args.data, store)
     print(
-        f"Added evidence #{item['id']}: [{item['control_id']}] {item['title']} "
+        f"Added evidence #{item['id']}: [{item['framework']}/{item['control_id']}] "
+        f"{item['title']} "
         f"(owner: {item['owner']}, due: {item['due_date']}, status: {item['status']})"
     )
     return 0
@@ -107,7 +130,8 @@ def cmd_list(args):
             flag = "  ** OVERDUE **"
             overdue_count += 1
         print(
-            f"#{item['id']:<3} [{item['control_id']}] {item['title']} | "
+            f"#{item['id']:<3} [{item_framework(item)}/{item['control_id']}] "
+            f"{item['title']} | "
             f"owner: {item['owner']} | due: {item['due_date']} | "
             f"status: {item['status']}{flag}"
         )

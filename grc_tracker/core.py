@@ -2,9 +2,18 @@
 
 from datetime import date
 
-from .controls_data import CONTROLS_BY_ID
+from .controls_data import DEFAULT_FRAMEWORK, FRAMEWORKS, controls_by_id
 
 STATUSES = ("requested", "received", "verified")
+
+
+def item_framework(item):
+    """Return an evidence item's framework, defaulting legacy items.
+
+    Items stored before v0.2 have no "framework" key; they belong to
+    the ISO 27001 catalogue, which was the only one at the time.
+    """
+    return item.get("framework") or DEFAULT_FRAMEWORK
 
 
 def parse_date(value):
@@ -25,16 +34,23 @@ def _next_id(store):
     return (max(ids) + 1) if ids else 1
 
 
-def add_evidence(store, control_id, title, owner, due_date, status="requested"):
+def add_evidence(store, control_id, title, owner, due_date, status="requested",
+                 framework=DEFAULT_FRAMEWORK):
     """Validate and append an evidence item to *store*; return the item.
 
-    Raises ValueError for an unknown control id, an unknown status, or a
+    Raises ValueError for an unknown framework, a control id that does
+    not belong to that framework's catalogue, an unknown status, or a
     malformed due date.
     """
-    if control_id not in CONTROLS_BY_ID:
+    if framework not in FRAMEWORKS:
         raise ValueError(
-            f"Unknown control id {control_id!r}. "
-            "Run `controls` to see the bundled catalogue."
+            f"Unknown framework {framework!r}: "
+            f"expected one of {', '.join(FRAMEWORKS)}."
+        )
+    if control_id not in controls_by_id(framework):
+        raise ValueError(
+            f"Unknown control id {control_id!r} for framework {framework!r}. "
+            f"Run `controls --framework {framework}` to see its catalogue."
         )
     if status not in STATUSES:
         raise ValueError(
@@ -43,6 +59,7 @@ def add_evidence(store, control_id, title, owner, due_date, status="requested"):
     parse_date(due_date)  # validate format; the string form is stored
     item = {
         "id": _next_id(store),
+        "framework": framework,
         "control_id": control_id,
         "title": title,
         "owner": owner,
