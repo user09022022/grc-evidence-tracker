@@ -1,6 +1,6 @@
 """Core logic: evidence items, validation, overdue detection, summaries."""
 
-from datetime import date
+from datetime import date, timedelta
 
 from .controls_data import DEFAULT_FRAMEWORK, FRAMEWORKS, controls_by_id
 
@@ -80,6 +80,48 @@ def is_overdue(item, today=None):
 def overdue_items(store, today=None):
     """Return all overdue evidence items, oldest due date first."""
     items = [i for i in store["evidence"] if is_overdue(i, today=today)]
+    return sorted(items, key=lambda i: i["due_date"])
+
+
+def days_until_due(item, today=None):
+    """Return days from *today* until the item's due date.
+
+    Positive when the due date is in the future, zero when it is
+    today, and negative when it has already passed.
+    """
+    today = today or date.today()
+    return (parse_date(item["due_date"]) - today).days
+
+
+def days_overdue(item, today=None):
+    """Return how many days the item is overdue, or 0 if it is not.
+
+    Verified items and items not yet past due return 0, matching the
+    `is_overdue` rule.
+    """
+    today = today or date.today()
+    if not is_overdue(item, today=today):
+        return 0
+    return (today - parse_date(item["due_date"])).days
+
+
+def due_within_items(store, within_days=7, today=None):
+    """Return open items due within *within_days* days, soonest first.
+
+    "Open" means not yet verified. Overdue items and items due today
+    are always included (they are already due); the window only
+    extends into the future. Raises ValueError for a negative window.
+    """
+    if within_days < 0:
+        raise ValueError(
+            f"Invalid window {within_days!r}: --days must be 0 or more."
+        )
+    today = today or date.today()
+    cutoff = today + timedelta(days=within_days)
+    items = [
+        i for i in store["evidence"]
+        if i["status"] != "verified" and parse_date(i["due_date"]) <= cutoff
+    ]
     return sorted(items, key=lambda i: i["due_date"])
 
 

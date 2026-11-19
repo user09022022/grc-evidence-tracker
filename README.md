@@ -8,7 +8,7 @@ automatically and one-command status reports for engagement meetings.
 
 Built with Python 3 standard library only — no dependencies.
 
-## Features (v0.2)
+## Features (v0.3)
 
 - **Bundled control catalogues** — 26 ISO 27001:2022 Annex A controls
   spanning all four themes (Organizational, People, Physical,
@@ -20,7 +20,12 @@ Built with Python 3 standard library only — no dependencies.
 - **Evidence tracking** — record each request with its control, title,
   owner, due date, and status (`requested` / `received` / `verified`).
 - **Overdue detection** — any item past its due date that is not yet
-  `verified` is flagged in listings and reports.
+  `verified` is flagged in listings and reports, with its aging
+  (`** OVERDUE (6 days overdue) **`) shown next to the flag in `list`.
+- **Due-date reminders** — `due` lists open items that are overdue or
+  due within N days (`--days`, default 7), soonest first, and
+  `--out reminders.txt` writes a plain-text reminder digest grouped
+  by owner, ready to paste into an email chasing outstanding evidence.
 - **Reports** — export a CSV detail file and a standalone HTML status
   page (counts by status plus the overdue list).
 - **Local JSON store** — all data lives in one portable `grc_data.json`
@@ -56,8 +61,11 @@ grc-tracker add-evidence --control A.8.13 \
 grc-tracker add-evidence --framework soc2 --control CC6.1 \
     --title "Access control matrix" \
     --owner "IT Operations" --due 2026-11-10
-grc-tracker list                       # list items, overdue flagged
+grc-tracker list                       # list items, overdue flagged with aging
 grc-tracker list --overdue             # only overdue items
+grc-tracker due                        # open items due within 7 days (+ overdue)
+grc-tracker due --days 14              # widen the look-ahead window
+grc-tracker due --out reminders.txt    # also write an owner reminder digest
 grc-tracker report --out ./reports     # write report.csv + report.html
 ```
 
@@ -94,8 +102,8 @@ $ python3 grc.py add-evidence --control A.6.3 --title "Security awareness traini
 Added evidence #2: [iso27001/A.6.3] Security awareness training records (owner: HR, due: 2026-11-12, status: received)
 
 $ python3 grc.py list
-#1   [iso27001/A.8.13] Backup restore test results | owner: IT Operations | due: 2026-11-10 | status: requested  ** OVERDUE **
-#2   [iso27001/A.6.3] Security awareness training records | owner: HR | due: 2026-11-12 | status: received  ** OVERDUE **
+#1   [iso27001/A.8.13] Backup restore test results | owner: IT Operations | due: 2026-11-10 | status: requested  ** OVERDUE (6 days overdue) **
+#2   [iso27001/A.6.3] Security awareness training records | owner: HR | due: 2026-11-12 | status: received  ** OVERDUE (4 days overdue) **
 #3   [iso27001/A.5.1] Approved information security policy | owner: CISO Office | due: 2026-11-05 | status: verified
 #4   [iso27001/A.8.5] MFA configuration export | owner: IT Operations | due: 2026-12-01 | status: requested
 
@@ -122,7 +130,7 @@ id,framework,control_id,control_title,title,owner,due_date,status,overdue
 ```bash
 python3 -m venv .venv
 .venv/bin/pip install pytest
-.venv/bin/python -m pytest     # 36 tests, all passing
+.venv/bin/python -m pytest     # 54 tests, all passing
 ```
 
 Project layout:
@@ -135,7 +143,7 @@ grc_tracker/
     core.py             evidence logic, validation, overdue rules
     controls_data.py    bundled ISO 27001 Annex A + SOC 2 CC1-CC9 catalogues
     store.py            JSON data store load/save
-    report.py           CSV and HTML report export
+    report.py           CSV/HTML report export + reminder digest
 tests/                  pytest suite (core logic + CLI end-to-end)
 ```
 

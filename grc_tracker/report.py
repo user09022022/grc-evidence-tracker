@@ -5,7 +5,15 @@ import html
 from datetime import date
 
 from .controls_data import CONTROLS_BY_ID
-from .core import is_overdue, item_framework, overdue_items, status_counts
+from .core import (
+    days_overdue,
+    days_until_due,
+    due_within_items,
+    is_overdue,
+    item_framework,
+    overdue_items,
+    status_counts,
+)
 
 CSV_FIELDS = [
     "id", "framework", "control_id", "control_title", "title", "owner",
@@ -94,4 +102,62 @@ def write_html(store, path, today=None):
 """
     with open(path, "w", encoding="utf-8") as fh:
         fh.write(page)
+    return path
+
+
+def _due_label(item, today):
+    """Human-readable aging label for a due/overdue item."""
+    overdue = days_overdue(item, today=today)
+    if overdue:
+        unit = "day" if overdue == 1 else "days"
+        return f"{overdue} {unit} overdue"
+    remaining = days_until_due(item, today=today)
+    if remaining == 0:
+        return "due today"
+    if remaining == 1:
+        return "due in 1 day"
+    return f"due in {remaining} days"
+
+
+def format_reminder_digest(store, within_days=7, today=None):
+    """Return a plain-text reminder digest grouped by owner.
+
+    Covers the same items as `core.due_within_items`: open items that
+    are overdue or due within *within_days* days. The text is written
+    to be pasted into an email to the owners who owe evidence.
+    """
+    today = today or date.today()
+    items = due_within_items(store, within_days=within_days, today=today)
+    lines = [
+        "GRC Evidence Tracker — Reminder Digest",
+        f"Generated {today.isoformat()} · "
+        f"{len(items)} item(s) due within {within_days} day(s) "
+        "(including overdue)",
+        "",
+    ]
+    if not items:
+        lines.append("No items are due in this window. Nothing to chase.")
+        lines.append("")
+        return "\n".join(lines)
+    by_owner = {}
+    for item in items:
+        by_owner.setdefault(item["owner"], []).append(item)
+    for owner in sorted(by_owner):
+        owned = by_owner[owner]
+        lines.append(f"{owner} ({len(owned)} item(s))")
+        for item in owned:
+            lines.append(
+                f"  - #{item['id']} [{item_framework(item)}/{item['control_id']}] "
+                f"{item['title']} — due {item['due_date']} "
+                f"({_due_label(item, today)}), status: {item['status']}"
+            )
+        lines.append("")
+    return "\n".join(lines)
+
+
+def write_reminder_digest(store, path, within_days=7, today=None):
+    """Write the reminder digest for *store* to *path* (text)."""
+    text = format_reminder_digest(store, within_days=within_days, today=today)
+    with open(path, "w", encoding="utf-8") as fh:
+        fh.write(text)
     return path

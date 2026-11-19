@@ -1,5 +1,30 @@
 # Build Log
 
+## 2026-11-18 — v0.3 (Due-date reminders)
+
+Chasing outstanding evidence gets its own command and an aging view.
+
+**Features**
+- `due` command — lists open (not verified) items that are overdue or
+  due within N days (`--days`, default 7), soonest due first. Overdue
+  items show their aging, upcoming items show days remaining, and
+  items due today are flagged `** DUE TODAY **`. A negative window is
+  rejected.
+- Aging in `list` — the overdue flag now carries the count, e.g.
+  `** OVERDUE (6 days overdue) **` (singular "1 day" handled), backed
+  by new `core.days_overdue` / `core.days_until_due` helpers and
+  `core.due_within_items` for the window logic.
+- Reminder digest — `due --out reminders.txt` writes a plain-text
+  digest (`report.format_reminder_digest` / `write_reminder_digest`)
+  grouping the same due items by owner with due dates and aging,
+  ready to paste into an email to the owners who owe evidence.
+
+**Tests** — pytest suite extended with day-count and window rules
+(including the zero-day window and verified-item exclusion),
+digest grouping/formatting, and CLI end-to-end runs for `due`,
+its `--days`/`--out` flags, and the aged `list` flag:
+**54 passed, 0 failed** (was 36 at v0.2).
+
 ## 2026-11-16 — v0.2 (SOC 2 control set)
 
 Second bundled catalogue, so one store can track evidence for either

@@ -1,6 +1,7 @@
 """End-to-end tests of the CLI entry point."""
 
 import os
+from datetime import date, timedelta
 
 from grc_tracker import cli
 
@@ -101,6 +102,105 @@ def test_cli_add_soc2_evidence_end_to_end(tmp_path, capsys):
     )
     assert code == 1
     assert "Error" in capsys.readouterr().err
+
+
+def _iso(days_from_today):
+    return (date.today() + timedelta(days=days_from_today)).isoformat()
+
+
+def test_cli_list_shows_days_overdue(tmp_path, capsys):
+    run_cli(tmp_path, "init")
+    run_cli(
+        tmp_path, "add-evidence",
+        "--control", "A.8.13", "--title", "Backup policy",
+        "--owner", "IT Operations", "--due", _iso(-3),
+    )
+    capsys.readouterr()
+    code, _ = run_cli(tmp_path, "list")
+    assert code == 0
+    out = capsys.readouterr().out
+    assert "OVERDUE (3 days overdue)" in out
+
+
+def test_cli_due_lists_overdue_and_upcoming_only(tmp_path, capsys):
+    run_cli(tmp_path, "init")
+    run_cli(
+        tmp_path, "add-evidence",
+        "--control", "A.8.13", "--title", "Overdue item",
+        "--owner", "IT Operations", "--due", _iso(-2),
+    )
+    run_cli(
+        tmp_path, "add-evidence",
+        "--control", "A.8.15", "--title", "Due soon item",
+        "--owner", "HR", "--due", _iso(3),
+    )
+    run_cli(
+        tmp_path, "add-evidence",
+        "--control", "A.8.5", "--title", "Far future item",
+        "--owner", "HR", "--due", _iso(30),
+    )
+    run_cli(
+        tmp_path, "add-evidence",
+        "--control", "A.5.1", "--title", "Verified old item",
+        "--owner", "CISO Office", "--due", _iso(-10), "--status", "verified",
+    )
+    capsys.readouterr()
+    code, _ = run_cli(tmp_path, "due")
+    assert code == 0
+    out = capsys.readouterr().out
+    assert "Overdue item" in out
+    assert "OVERDUE (2 days overdue)" in out
+    assert "Due soon item" in out
+    assert "due in 3 days" in out
+    assert "Far future item" not in out
+    assert "Verified old item" not in out
+    assert "2 item(s) due within 7 day(s), 1 overdue" in out
+
+
+def test_cli_due_days_flag_widens_window(tmp_path, capsys):
+    run_cli(tmp_path, "init")
+    run_cli(
+        tmp_path, "add-evidence",
+        "--control", "A.8.5", "--title", "Far future item",
+        "--owner", "HR", "--due", _iso(30),
+    )
+    capsys.readouterr()
+    code, _ = run_cli(tmp_path, "due")
+    assert code == 0
+    assert "No items due within 7 day(s)." in capsys.readouterr().out
+    code, _ = run_cli(tmp_path, "due", "--days", "30")
+    assert code == 0
+    out = capsys.readouterr().out
+    assert "Far future item" in out
+    assert "due in 30 days" in out
+
+
+def test_cli_due_rejects_negative_days(tmp_path, capsys):
+    run_cli(tmp_path, "init")
+    capsys.readouterr()
+    code, _ = run_cli(tmp_path, "due", "--days", "-1")
+    assert code == 1
+    assert "Error" in capsys.readouterr().err
+
+
+def test_cli_due_out_writes_reminder_digest(tmp_path, capsys):
+    run_cli(tmp_path, "init")
+    run_cli(
+        tmp_path, "add-evidence",
+        "--control", "A.8.13", "--title", "Overdue item",
+        "--owner", "IT Operations", "--due", _iso(-1),
+    )
+    capsys.readouterr()
+    digest = str(tmp_path / "reminders.txt")
+    code, _ = run_cli(tmp_path, "due", "--out", digest)
+    assert code == 0
+    out = capsys.readouterr().out
+    assert f"Wrote reminder digest: {digest}" in out
+    text = open(digest, encoding="utf-8").read()
+    assert "Reminder Digest" in text
+    assert "IT Operations (1 item(s))" in text
+    assert "Overdue item" in text
+    assert "1 day overdue" in text
 
 
 def test_cli_add_before_init_fails_cleanly(tmp_path, capsys):

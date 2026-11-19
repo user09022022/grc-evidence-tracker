@@ -12,7 +12,16 @@ from .controls_data import (
     controls_for,
     themes_for,
 )
-from .core import STATUSES, add_evidence, is_overdue, item_framework, status_counts
+from .core import (
+    STATUSES,
+    add_evidence,
+    days_overdue,
+    days_until_due,
+    due_within_items,
+    is_overdue,
+    item_framework,
+    status_counts,
+)
 from .store import DEFAULT_PATH, init_store, load_store, save_store
 
 
@@ -57,6 +66,18 @@ def build_parser():
     p_list = sub.add_parser("list", help="list evidence items, flagging overdue ones")
     p_list.add_argument(
         "--overdue", action="store_true", help="only show overdue items",
+    )
+
+    p_due = sub.add_parser(
+        "due", help="list open items due within N days (including overdue)",
+    )
+    p_due.add_argument(
+        "--days", type=int, default=7,
+        help="look-ahead window in days (default: 7)",
+    )
+    p_due.add_argument(
+        "--out", default=None,
+        help="also write a reminder digest for owners to this text file",
     )
 
     p_report = sub.add_parser("report", help="export CSV + HTML status reports")
@@ -127,7 +148,9 @@ def cmd_list(args):
     for item in items:
         flag = ""
         if is_overdue(item, today=today):
-            flag = "  ** OVERDUE **"
+            aged = days_overdue(item, today=today)
+            unit = "day" if aged == 1 else "days"
+            flag = f"  ** OVERDUE ({aged} {unit} overdue) **"
             overdue_count += 1
         print(
             f"#{item['id']:<3} [{item_framework(item)}/{item['control_id']}] "
@@ -136,6 +159,47 @@ def cmd_list(args):
             f"status: {item['status']}{flag}"
         )
     print(f"\n{len(items)} item(s), {overdue_count} overdue")
+    return 0
+
+
+def cmd_due(args):
+    store = load_store(args.data)
+    today = date.today()
+    items = due_within_items(store, within_days=args.days, today=today)
+    if args.out:
+        report_mod.write_reminder_digest(
+            store, args.out, within_days=args.days, today=today,
+        )
+    if not items:
+        print(f"No items due within {args.days} day(s).")
+    else:
+        overdue_count = 0
+        for item in items:
+            if is_overdue(item, today=today):
+                aged = days_overdue(item, today=today)
+                unit = "day" if aged == 1 else "days"
+                flag = f"  ** OVERDUE ({aged} {unit} overdue) **"
+                overdue_count += 1
+            else:
+                remaining = days_until_due(item, today=today)
+                if remaining == 0:
+                    flag = "  ** DUE TODAY **"
+                elif remaining == 1:
+                    flag = "  (due in 1 day)"
+                else:
+                    flag = f"  (due in {remaining} days)"
+            print(
+                f"#{item['id']:<3} [{item_framework(item)}/{item['control_id']}] "
+                f"{item['title']} | "
+                f"owner: {item['owner']} | due: {item['due_date']} | "
+                f"status: {item['status']}{flag}"
+            )
+        print(
+            f"\n{len(items)} item(s) due within {args.days} day(s), "
+            f"{overdue_count} overdue"
+        )
+    if args.out:
+        print(f"Wrote reminder digest: {args.out}")
     return 0
 
 
@@ -163,6 +227,7 @@ COMMANDS = {
     "controls": cmd_controls,
     "add-evidence": cmd_add_evidence,
     "list": cmd_list,
+    "due": cmd_due,
     "report": cmd_report,
 }
 

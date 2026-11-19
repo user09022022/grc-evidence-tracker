@@ -225,6 +225,115 @@ def test_future_item_is_not_overdue(populated_store):
     assert core.is_overdue(item, today=TODAY) is False
 
 
+# --- Due-date reminders (v0.3) -------------------------------------------
+
+def test_days_overdue_counts_past_due_days(populated_store):
+    backup, training = populated_store["evidence"][0], populated_store["evidence"][1]
+    assert core.days_overdue(backup, today=TODAY) == 6    # due Nov 10
+    assert core.days_overdue(training, today=TODAY) == 4  # due Nov 12
+
+
+def test_days_overdue_is_zero_when_not_overdue(populated_store):
+    verified, future = populated_store["evidence"][2], populated_store["evidence"][3]
+    assert core.days_overdue(verified, today=TODAY) == 0
+    assert core.days_overdue(future, today=TODAY) == 0
+
+
+def test_days_overdue_singular_for_one_day(empty_store):
+    item = core.add_evidence(
+        empty_store, "A.8.15", "Log samples", "IT Operations", "2026-11-15",
+    )
+    assert core.days_overdue(item, today=TODAY) == 1
+
+
+def test_days_until_due_sign_convention(populated_store):
+    backup, future = populated_store["evidence"][0], populated_store["evidence"][3]
+    assert core.days_until_due(backup, today=TODAY) == -6
+    assert core.days_until_due(future, today=TODAY) == 15
+
+
+def test_due_within_includes_overdue_and_window(populated_store):
+    due = core.due_within_items(populated_store, within_days=7, today=TODAY)
+    titles = [i["title"] for i in due]
+    # Overdue items are included; the Dec 1 item (15 days out) is not.
+    assert titles == [
+        "Backup restore test results",
+        "Security awareness training records",
+    ]
+
+
+def test_due_within_wider_window_includes_future_item(populated_store):
+    due = core.due_within_items(populated_store, within_days=20, today=TODAY)
+    assert [i["title"] for i in due][-1] == "MFA configuration export"
+    assert len(due) == 3
+
+
+def test_due_within_excludes_verified_items(populated_store):
+    due = core.due_within_items(populated_store, within_days=365, today=TODAY)
+    assert all(i["status"] != "verified" for i in due)
+    assert "Approved information security policy" not in {
+        i["title"] for i in due
+    }
+
+
+def test_due_within_zero_days_is_overdue_plus_due_today(empty_store):
+    core.add_evidence(
+        empty_store, "A.8.13", "Past due", "IT Operations", "2026-11-10",
+    )
+    core.add_evidence(
+        empty_store, "A.8.15", "Due today", "IT Operations", "2026-11-16",
+    )
+    core.add_evidence(
+        empty_store, "A.8.5", "Due tomorrow", "IT Operations", "2026-11-17",
+    )
+    due = core.due_within_items(empty_store, within_days=0, today=TODAY)
+    assert [i["title"] for i in due] == ["Past due", "Due today"]
+
+
+def test_due_within_rejects_negative_window(populated_store):
+    with pytest.raises(ValueError):
+        core.due_within_items(populated_store, within_days=-1, today=TODAY)
+
+
+def test_reminder_digest_groups_items_by_owner(populated_store):
+    text = report.format_reminder_digest(
+        populated_store, within_days=7, today=TODAY,
+    )
+    assert "Reminder Digest" in text
+    assert "IT Operations (1 item(s))" in text
+    assert "HR (1 item(s))" in text
+    assert "Backup restore test results" in text
+    assert "6 days overdue" in text
+    assert "4 days overdue" in text
+    # The verified item and the far-future item are not chased.
+    assert "Approved information security policy" not in text
+    assert "MFA configuration export" not in text
+
+
+def test_reminder_digest_shows_days_remaining_for_upcoming(populated_store):
+    text = report.format_reminder_digest(
+        populated_store, within_days=20, today=TODAY,
+    )
+    assert "due in 15 days" in text
+
+
+def test_reminder_digest_empty_window(tmp_path, empty_store):
+    text = report.format_reminder_digest(empty_store, within_days=7, today=TODAY)
+    assert "No items are due in this window" in text
+    path = str(tmp_path / "digest.txt")
+    assert report.write_reminder_digest(
+        empty_store, path, within_days=7, today=TODAY,
+    ) == path
+    assert open(path, encoding="utf-8").read() == text
+
+
+def test_write_reminder_digest_creates_file(tmp_path, populated_store):
+    path = str(tmp_path / "reminders.txt")
+    report.write_reminder_digest(populated_store, path, within_days=7, today=TODAY)
+    text = open(path, encoding="utf-8").read()
+    assert "Security awareness training records" in text
+
+
 # --- Summaries and reports -------------------------------------------------
 
 def test_status_counts(populated_store):
