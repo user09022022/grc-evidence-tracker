@@ -8,7 +8,7 @@ automatically and one-command status reports for engagement meetings.
 
 Built with Python 3 standard library only — no dependencies.
 
-## Features (v0.3)
+## Features (v0.4)
 
 - **Bundled control catalogues** — 26 ISO 27001:2022 Annex A controls
   spanning all four themes (Organizational, People, Physical,
@@ -26,6 +26,11 @@ Built with Python 3 standard library only — no dependencies.
   due within N days (`--days`, default 7), soonest first, and
   `--out reminders.txt` writes a plain-text reminder digest grouped
   by owner, ready to paste into an email chasing outstanding evidence.
+- **Status workflow** — `update <id>` changes an item's status, owner,
+  and/or due date in place (no more hand-editing the JSON), with every
+  actual change recorded in the item's history; `show <id>` prints one
+  item in full — control, framework, owner, due date, status, overdue
+  aging — together with its complete history from creation onward.
 - **Reports** — export a CSV detail file and a standalone HTML status
   page (counts by status plus the overdue list).
 - **Local JSON store** — all data lives in one portable `grc_data.json`
@@ -66,6 +71,9 @@ grc-tracker list --overdue             # only overdue items
 grc-tracker due                        # open items due within 7 days (+ overdue)
 grc-tracker due --days 14              # widen the look-ahead window
 grc-tracker due --out reminders.txt    # also write an owner reminder digest
+grc-tracker update 1 --status received # move an item through the workflow
+grc-tracker update 1 --owner "Security Team" --due 2026-12-05
+grc-tracker show 1                     # one item in full, with its history
 grc-tracker report --out ./reports     # write report.csv + report.html
 ```
 
@@ -130,7 +138,7 @@ id,framework,control_id,control_title,title,owner,due_date,status,overdue
 ```bash
 python3 -m venv .venv
 .venv/bin/pip install pytest
-.venv/bin/python -m pytest     # 54 tests, all passing
+.venv/bin/python -m pytest     # 78 tests, all passing
 ```
 
 Project layout:

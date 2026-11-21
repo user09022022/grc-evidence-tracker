@@ -203,6 +203,126 @@ def test_cli_due_out_writes_reminder_digest(tmp_path, capsys):
     assert "1 day overdue" in text
 
 
+def test_cli_update_changes_status_and_persists(tmp_path, capsys):
+    run_cli(tmp_path, "init")
+    run_cli(
+        tmp_path, "add-evidence",
+        "--control", "A.8.13", "--title", "Backup policy",
+        "--owner", "IT Operations", "--due", "2026-12-01",
+    )
+    capsys.readouterr()
+    code, _ = run_cli(tmp_path, "update", "1", "--status", "received")
+    assert code == 0
+    out = capsys.readouterr().out
+    assert "Updated evidence #1" in out
+    assert "status: received" in out
+
+    code, _ = run_cli(tmp_path, "list")
+    assert code == 0
+    out = capsys.readouterr().out
+    assert "status: received" in out
+
+
+def test_cli_update_owner_and_due(tmp_path, capsys):
+    run_cli(tmp_path, "init")
+    run_cli(
+        tmp_path, "add-evidence",
+        "--control", "A.8.13", "--title", "Backup policy",
+        "--owner", "IT Operations", "--due", "2026-12-01",
+    )
+    capsys.readouterr()
+    code, _ = run_cli(
+        tmp_path, "update", "1",
+        "--owner", "Security Team", "--due", "2026-12-20",
+    )
+    assert code == 0
+    out = capsys.readouterr().out
+    assert "owner: Security Team" in out
+    assert "due: 2026-12-20" in out
+
+
+def test_cli_update_unknown_id_fails_cleanly(tmp_path, capsys):
+    run_cli(tmp_path, "init")
+    capsys.readouterr()
+    code, _ = run_cli(tmp_path, "update", "99", "--status", "received")
+    assert code == 1
+    assert "Error" in capsys.readouterr().err
+
+
+def test_cli_update_without_fields_fails_cleanly(tmp_path, capsys):
+    run_cli(tmp_path, "init")
+    run_cli(
+        tmp_path, "add-evidence",
+        "--control", "A.8.13", "--title", "Backup policy",
+        "--owner", "IT Operations", "--due", "2026-12-01",
+    )
+    capsys.readouterr()
+    code, _ = run_cli(tmp_path, "update", "1")
+    assert code == 1
+    assert "Error" in capsys.readouterr().err
+
+
+def test_cli_update_rejects_invalid_due_date(tmp_path, capsys):
+    run_cli(tmp_path, "init")
+    run_cli(
+        tmp_path, "add-evidence",
+        "--control", "A.8.13", "--title", "Backup policy",
+        "--owner", "IT Operations", "--due", "2026-12-01",
+    )
+    capsys.readouterr()
+    code, _ = run_cli(tmp_path, "update", "1", "--due", "Dec 20")
+    assert code == 1
+    assert "Error" in capsys.readouterr().err
+
+
+def test_cli_show_prints_item_and_history(tmp_path, capsys):
+    run_cli(tmp_path, "init")
+    run_cli(
+        tmp_path, "add-evidence",
+        "--control", "A.8.13", "--title", "Backup policy",
+        "--owner", "IT Operations", "--due", _iso(-5),
+    )
+    run_cli(tmp_path, "update", "1", "--status", "received")
+    run_cli(tmp_path, "update", "1", "--owner", "Security Team")
+    capsys.readouterr()
+    code, _ = run_cli(tmp_path, "show", "1")
+    assert code == 0
+    out = capsys.readouterr().out
+    assert "Evidence #1: [iso27001/A.8.13] Backup policy" in out
+    assert "A.8.13 — Information backup" in out
+    assert "Owner:     Security Team" in out
+    assert "Status:    received" in out
+    assert "Overdue:   yes (5 days overdue)" in out
+    assert "History:" in out
+    assert "created" in out
+    assert "status: requested -> received" in out
+    assert "owner: IT Operations -> Security Team" in out
+
+
+def test_cli_show_without_updates_shows_creation_only(tmp_path, capsys):
+    run_cli(tmp_path, "init")
+    run_cli(
+        tmp_path, "add-evidence",
+        "--control", "A.8.5", "--title", "MFA export",
+        "--owner", "IT Operations", "--due", _iso(10),
+    )
+    capsys.readouterr()
+    code, _ = run_cli(tmp_path, "show", "1")
+    assert code == 0
+    out = capsys.readouterr().out
+    assert "Overdue:   no" in out
+    assert "created" in out
+    assert "->" not in out
+
+
+def test_cli_show_unknown_id_fails_cleanly(tmp_path, capsys):
+    run_cli(tmp_path, "init")
+    capsys.readouterr()
+    code, _ = run_cli(tmp_path, "show", "42")
+    assert code == 1
+    assert "Error" in capsys.readouterr().err
+
+
 def test_cli_add_before_init_fails_cleanly(tmp_path, capsys):
     code, _ = run_cli(
         tmp_path, "add-evidence",

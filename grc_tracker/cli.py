@@ -7,6 +7,7 @@ from datetime import date
 
 from . import report as report_mod
 from .controls_data import (
+    CONTROLS_BY_ID,
     DEFAULT_FRAMEWORK,
     FRAMEWORKS,
     controls_for,
@@ -18,9 +19,12 @@ from .core import (
     days_overdue,
     days_until_due,
     due_within_items,
+    find_item,
     is_overdue,
     item_framework,
+    item_history,
     status_counts,
+    update_evidence,
 )
 from .store import DEFAULT_PATH, init_store, load_store, save_store
 
@@ -79,6 +83,23 @@ def build_parser():
         "--out", default=None,
         help="also write a reminder digest for owners to this text file",
     )
+
+    p_update = sub.add_parser(
+        "update", help="change an item's status, owner, or due date",
+    )
+    p_update.add_argument("id", type=int, help="evidence item id")
+    p_update.add_argument(
+        "--status", choices=STATUSES, default=None, help="new status",
+    )
+    p_update.add_argument("--owner", default=None, help="new owner")
+    p_update.add_argument(
+        "--due", default=None, help="new due date, YYYY-MM-DD",
+    )
+
+    p_show = sub.add_parser(
+        "show", help="show one evidence item with its full history",
+    )
+    p_show.add_argument("id", type=int, help="evidence item id")
 
     p_report = sub.add_parser("report", help="export CSV + HTML status reports")
     p_report.add_argument(
@@ -203,6 +224,63 @@ def cmd_due(args):
     return 0
 
 
+def cmd_update(args):
+    store = load_store(args.data)
+    item = update_evidence(
+        store,
+        item_id=args.id,
+        status=args.status,
+        owner=args.owner,
+        due_date=args.due,
+    )
+    save_store(args.data, store)
+    print(
+        f"Updated evidence #{item['id']}: [{item_framework(item)}/{item['control_id']}] "
+        f"{item['title']} "
+        f"(owner: {item['owner']}, due: {item['due_date']}, status: {item['status']})"
+    )
+    return 0
+
+
+def cmd_show(args):
+    store = load_store(args.data)
+    item = find_item(store, args.id)
+    today = date.today()
+    framework = item_framework(item)
+    control = CONTROLS_BY_ID.get(item["control_id"], {})
+    control_title = control.get("title", "Unknown control")
+    print(
+        f"Evidence #{item['id']}: [{framework}/{item['control_id']}] "
+        f"{item['title']}"
+    )
+    print(f"  Control:   {item['control_id']} — {control_title}")
+    print(f"  Framework: {framework}")
+    print(f"  Title:     {item['title']}")
+    print(f"  Owner:     {item['owner']}")
+    print(f"  Due:       {item['due_date']}")
+    print(f"  Status:    {item['status']}")
+    if item.get("created"):
+        print(f"  Created:   {item['created']}")
+    if is_overdue(item, today=today):
+        aged = days_overdue(item, today=today)
+        unit = "day" if aged == 1 else "days"
+        print(f"  Overdue:   yes ({aged} {unit} overdue)")
+    else:
+        print("  Overdue:   no")
+    print("  History:")
+    if item.get("created"):
+        print(f"    {item['created']}  created")
+    history = item_history(item)
+    if not history and not item.get("created"):
+        print("    (no history recorded)")
+    for entry in history:
+        print(
+            f"    {entry['date']}  {entry['field']}: "
+            f"{entry['old']} -> {entry['new']}"
+        )
+    return 0
+
+
 def cmd_report(args):
     store = load_store(args.data)
     os.makedirs(args.out, exist_ok=True)
@@ -228,6 +306,8 @@ COMMANDS = {
     "add-evidence": cmd_add_evidence,
     "list": cmd_list,
     "due": cmd_due,
+    "update": cmd_update,
+    "show": cmd_show,
     "report": cmd_report,
 }
 

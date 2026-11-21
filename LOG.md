@@ -1,5 +1,34 @@
 # Build Log
 
+## 2026-11-20 — v0.4 (Status workflow commands)
+
+Corrections no longer mean editing the JSON store by hand, and a
+single item can be inspected with everything that has happened to it.
+
+**Features**
+- `update <id>` command — changes an item's status, owner and/or due
+  date in place (`--status` / `--owner` / `--due`), backed by
+  `core.update_evidence`. Validation matches `add-evidence` (status
+  must be a known status, due date must be YYYY-MM-DD, owner must not
+  be empty); an unknown id, no fields, or values that already match
+  the item are rejected without touching the store.
+- Change history — every new item starts with an empty `history`
+  list, and each field `update` actually changes appends a
+  `{date, field, old, new}` entry (in status / owner / due-date
+  order), exposed via `core.find_item` / `core.item_history`.
+  Items stored before v0.4 (no `history` key) are treated as having
+  no recorded changes and can be updated normally.
+- `show <id>` command — prints one item in full: control id and
+  title, framework, title, owner, due date, status, creation date
+  and overdue aging, followed by its full history (creation line
+  plus one line per recorded change, `field: old -> new`).
+
+**Tests** — pytest suite extended with update validation and
+history rules (accumulation across updates, partial no-ops, legacy
+items, reload round-trip) and CLI end-to-end runs for `update`
+and `show`, including their failure modes:
+**78 passed, 0 failed** (was 54 at v0.3).
+
 ## 2026-11-18 — v0.3 (Due-date reminders)
 
 Chasing outstanding evidence gets its own command and an aging view.

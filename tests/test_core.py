@@ -334,6 +334,133 @@ def test_write_reminder_digest_creates_file(tmp_path, populated_store):
     assert "Security awareness training records" in text
 
 
+# --- Status workflow: update / show (v0.4) --------------------------------
+
+def test_add_evidence_starts_with_empty_history(populated_store):
+    assert all(i["history"] == [] for i in populated_store["evidence"])
+
+
+def test_find_item_returns_matching_item(populated_store):
+    item = core.find_item(populated_store, 2)
+    assert item["title"] == "Security awareness training records"
+
+
+def test_find_item_rejects_unknown_id(populated_store):
+    with pytest.raises(ValueError):
+        core.find_item(populated_store, 999)
+
+
+def test_update_status_changes_value_and_records_history(populated_store):
+    item = core.update_evidence(
+        populated_store, 1, status="received", today=TODAY,
+    )
+    assert item["status"] == "received"
+    assert core.item_history(item) == [{
+        "date": "2026-11-16", "field": "status",
+        "old": "requested", "new": "received",
+    }]
+
+
+def test_update_owner_and_due_date_together(populated_store):
+    item = core.update_evidence(
+        populated_store, 1, owner="Security Team", due_date="2026-12-10",
+        today=TODAY,
+    )
+    assert item["owner"] == "Security Team"
+    assert item["due_date"] == "2026-12-10"
+    fields = [e["field"] for e in core.item_history(item)]
+    assert fields == ["owner", "due_date"]
+
+
+def test_update_all_three_fields_records_three_entries(populated_store):
+    item = core.update_evidence(
+        populated_store, 2, status="verified", owner="People Team",
+        due_date="2026-11-20", today=TODAY,
+    )
+    assert item["status"] == "verified"
+    assert [e["field"] for e in core.item_history(item)] == [
+        "status", "owner", "due_date",
+    ]
+
+
+def test_update_history_accumulates_across_updates(populated_store):
+    core.update_evidence(populated_store, 1, status="received", today=TODAY)
+    item = core.update_evidence(
+        populated_store, 1, status="verified", today=date(2026, 11, 18),
+    )
+    history = core.item_history(item)
+    assert len(history) == 2
+    assert history[0]["new"] == "received"
+    assert history[1] == {
+        "date": "2026-11-18", "field": "status",
+        "old": "received", "new": "verified",
+    }
+
+
+def test_update_rejects_unknown_id(populated_store):
+    with pytest.raises(ValueError):
+        core.update_evidence(populated_store, 999, status="received")
+
+
+def test_update_rejects_no_fields(populated_store):
+    with pytest.raises(ValueError):
+        core.update_evidence(populated_store, 1)
+
+
+def test_update_rejects_unchanged_values(populated_store):
+    with pytest.raises(ValueError):
+        core.update_evidence(populated_store, 1, status="requested")
+    # A failed/no-op update leaves the item and its history untouched.
+    assert populated_store["evidence"][0]["history"] == []
+
+
+def test_update_partial_noop_only_records_real_changes(populated_store):
+    item = core.update_evidence(
+        populated_store, 1, status="requested", owner="New Owner",
+        today=TODAY,
+    )
+    assert [e["field"] for e in core.item_history(item)] == ["owner"]
+
+
+def test_update_rejects_invalid_status(populated_store):
+    with pytest.raises(ValueError):
+        core.update_evidence(populated_store, 1, status="done")
+
+
+def test_update_rejects_invalid_due_date(populated_store):
+    with pytest.raises(ValueError):
+        core.update_evidence(populated_store, 1, due_date="Dec 10")
+
+
+def test_update_rejects_empty_owner(populated_store):
+    with pytest.raises(ValueError):
+        core.update_evidence(populated_store, 1, owner="   ")
+
+
+def test_update_legacy_item_without_history(populated_store):
+    legacy = store.new_store()
+    legacy["evidence"].append({
+        "id": 1, "control_id": "A.8.13",
+        "title": "Backup restore test results", "owner": "IT Operations",
+        "due_date": "2026-11-10", "status": "requested",
+        "created": "2026-11-16",
+    })
+    assert core.item_history(legacy["evidence"][0]) == []
+    item = core.update_evidence(legacy, 1, status="received", today=TODAY)
+    assert item["status"] == "received"
+    assert len(core.item_history(item)) == 1
+
+
+def test_update_then_reload_round_trip(tmp_path, populated_store):
+    core.update_evidence(populated_store, 1, status="received", today=TODAY)
+    path = str(tmp_path / "data.json")
+    store.save_store(path, populated_store)
+    loaded = store.load_store(path)
+    item = core.find_item(loaded, 1)
+    assert item["status"] == "received"
+    assert core.item_history(item)[0]["field"] == "status"
+
+
 # --- Summaries and reports -------------------------------------------------
 
 def test_status_counts(populated_store):

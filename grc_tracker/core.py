@@ -66,8 +66,83 @@ def add_evidence(store, control_id, title, owner, due_date, status="requested",
         "due_date": due_date,
         "status": status,
         "created": date.today().isoformat(),
+        "history": [],
     }
     store["evidence"].append(item)
+    return item
+
+
+def find_item(store, item_id):
+    """Return the evidence item with *item_id* from *store*.
+
+    Raises ValueError if no item has that id.
+    """
+    for item in store["evidence"]:
+        if item["id"] == item_id:
+            return item
+    raise ValueError(f"No evidence item with id {item_id}.")
+
+
+def item_history(item):
+    """Return an item's change history, oldest first.
+
+    Items stored before v0.4 have no "history" key; they are treated
+    as having no recorded changes (their creation is still shown from
+    the item's "created" date).
+    """
+    return list(item.get("history") or [])
+
+
+def update_evidence(store, item_id, status=None, owner=None, due_date=None,
+                    today=None):
+    """Change an item's status, owner and/or due date in place.
+
+    Only the fields passed as non-None are considered. Each field
+    whose value actually changes is recorded in the item's history
+    as ``{"date", "field", "old", "new"}`` and the item is returned.
+
+    Raises ValueError if the item does not exist, if no field is
+    provided, if every provided value already matches the item, or
+    if a provided status or due date is invalid (an empty owner is
+    likewise rejected).
+    """
+    item = find_item(store, item_id)
+    if status is None and owner is None and due_date is None:
+        raise ValueError(
+            "Nothing to update: provide at least one of "
+            "status, owner, or due date."
+        )
+    if status is not None and status not in STATUSES:
+        raise ValueError(
+            f"Invalid status {status!r}: expected one of {', '.join(STATUSES)}."
+        )
+    if owner is not None and not owner.strip():
+        raise ValueError("Owner must not be empty.")
+    if due_date is not None:
+        parse_date(due_date)  # validate format; the string form is stored
+    today = today or date.today()
+    history = item.setdefault("history", [])
+    changes = []
+    for field, new_value in (
+        ("status", status), ("owner", owner), ("due_date", due_date),
+    ):
+        if new_value is None:
+            continue
+        old_value = item[field]
+        if new_value == old_value:
+            continue
+        history.append({
+            "date": today.isoformat(),
+            "field": field,
+            "old": old_value,
+            "new": new_value,
+        })
+        item[field] = new_value
+        changes.append(field)
+    if not changes:
+        raise ValueError(
+            "No changes: the new value(s) already match the item."
+        )
     return item
 
 
