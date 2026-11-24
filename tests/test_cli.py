@@ -323,6 +323,38 @@ def test_cli_show_unknown_id_fails_cleanly(tmp_path, capsys):
     assert "Error" in capsys.readouterr().err
 
 
+def test_cli_report_xlsx_writes_only_workbook(tmp_path, capsys):
+    import pytest
+    pytest.importorskip("openpyxl")
+    run_cli(tmp_path, "init")
+    run_cli(
+        tmp_path, "add-evidence",
+        "--control", "A.8.13", "--title", "Backup policy",
+        "--owner", "IT Operations", "--due", "2026-12-01",
+    )
+    capsys.readouterr()
+    out_dir = str(tmp_path / "out")
+    code, _ = run_cli(tmp_path, "report", "--out", out_dir, "--format", "xlsx")
+    assert code == 0
+    out = capsys.readouterr().out
+    xlsx_path = os.path.join(out_dir, "report.xlsx")
+    assert f"Wrote {xlsx_path}" in out
+    assert os.path.exists(xlsx_path)
+    assert not os.path.exists(os.path.join(out_dir, "report.csv"))
+    assert not os.path.exists(os.path.join(out_dir, "report.html"))
+
+
+def test_cli_report_format_csv_writes_only_csv(tmp_path, capsys):
+    run_cli(tmp_path, "init")
+    capsys.readouterr()
+    out_dir = str(tmp_path / "out")
+    code, _ = run_cli(tmp_path, "report", "--out", out_dir, "--format", "csv")
+    assert code == 0
+    assert os.path.exists(os.path.join(out_dir, "report.csv"))
+    assert not os.path.exists(os.path.join(out_dir, "report.html"))
+    assert not os.path.exists(os.path.join(out_dir, "report.xlsx"))
+
+
 def test_cli_add_before_init_fails_cleanly(tmp_path, capsys):
     code, _ = run_cli(
         tmp_path, "add-evidence",

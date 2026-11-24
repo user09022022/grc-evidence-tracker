@@ -1,5 +1,32 @@
 # Build Log
 
+## 2026-11-23 — v0.5 (Excel export)
+
+Status reporting now produces a workbook an engagement team can
+open, filter and present, without giving up the dependency-free core.
+
+**Features**
+- `report --format xlsx` — writes `report.xlsx`, a formatted Excel
+  workbook produced by `report.write_xlsx`: a Summary sheet
+  (generation date, counts by status, total and overdue count, with
+  bold header/total rows) and a Detail sheet (one row per item with
+  the same columns as the CSV report, styled header, frozen top row,
+  auto-filter and overdue rows highlighted).
+- `report --format {all,csv,html,xlsx}` — `csv` / `html` write just
+  that one format; the default `all` keeps the previous behaviour
+  (CSV + HTML) so existing workflows are unchanged.
+- `openpyxl` is the project's first third-party dependency, and it
+  stays optional: it is declared as the `xlsx` extra in
+  `pyproject.toml` and imported lazily inside `write_xlsx`, so every
+  other command still runs on the standard library alone. Without
+  openpyxl, the xlsx format fails cleanly with install guidance.
+
+**Tests** — pytest suite extended with workbook structure, summary
+counts, detail rows (including SOC 2 framework and the empty store),
+and CLI end-to-end runs for `--format xlsx` and `--format csv`
+(the xlsx tests skip cleanly when openpyxl is not installed):
+**85 passed, 0 failed** (was 78 at v0.4).
+
 ## 2026-11-20 — v0.4 (Status workflow commands)
 
 Corrections no longer mean editing the JSON store by hand, and a

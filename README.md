@@ -6,9 +6,11 @@ requests ("PBC lists") per engagement; this tool tracks who owes what,
 by when, and what is still outstanding — with overdue items flagged
 automatically and one-command status reports for engagement meetings.
 
-Built with Python 3 standard library only — no dependencies.
+Built with Python 3 standard library only — no dependencies for the
+core tool. The optional Excel export (v0.5) uses `openpyxl`, installed
+only when you ask for it (`pip install .[xlsx]`).
 
-## Features (v0.4)
+## Features (v0.5)
 
 - **Bundled control catalogues** — 26 ISO 27001:2022 Annex A controls
   spanning all four themes (Organizational, People, Physical,
@@ -32,7 +34,12 @@ Built with Python 3 standard library only — no dependencies.
   item in full — control, framework, owner, due date, status, overdue
   aging — together with its complete history from creation onward.
 - **Reports** — export a CSV detail file and a standalone HTML status
-  page (counts by status plus the overdue list).
+  page (counts by status plus the overdue list), or — with
+  `report --format xlsx` — a formatted Excel workbook with a Summary
+  sheet (counts by status, total, overdue) and a Detail sheet (one
+  row per item, same columns as the CSV, with a filter, a frozen
+  header row, and overdue rows highlighted). `--format csv` / `html`
+  write just that one format; the default writes CSV + HTML.
 - **Local JSON store** — all data lives in one portable `grc_data.json`
   file; no database or account needed.
 
@@ -44,6 +51,7 @@ Requires Python 3.9+.
 git clone https://github.com/user09022022/grc-evidence-tracker.git
 cd grc-evidence-tracker
 pip install .          # provides the `grc-tracker` command
+pip install ".[xlsx]"  # optional: adds openpyxl for the Excel export
 ```
 
 Or run it in place without installing:
@@ -75,6 +83,7 @@ grc-tracker update 1 --status received # move an item through the workflow
 grc-tracker update 1 --owner "Security Team" --due 2026-12-05
 grc-tracker show 1                     # one item in full, with its history
 grc-tracker report --out ./reports     # write report.csv + report.html
+grc-tracker report --format xlsx       # write report.xlsx (needs openpyxl)
 ```
 
 Use `--data PATH` before the subcommand to keep separate stores
@@ -137,8 +146,8 @@ id,framework,control_id,control_title,title,owner,due_date,status,overdue
 
 ```bash
 python3 -m venv .venv
-.venv/bin/pip install pytest
-.venv/bin/python -m pytest     # 78 tests, all passing
+.venv/bin/pip install pytest openpyxl
+.venv/bin/python -m pytest     # 85 tests, all passing
 ```
 
 Project layout:
@@ -151,7 +160,7 @@ grc_tracker/
     core.py             evidence logic, validation, overdue rules
     controls_data.py    bundled ISO 27001 Annex A + SOC 2 CC1-CC9 catalogues
     store.py            JSON data store load/save
-    report.py           CSV/HTML report export + reminder digest
+    report.py           CSV/HTML/XLSX report export + reminder digest
 tests/                  pytest suite (core logic + CLI end-to-end)
 ```
 

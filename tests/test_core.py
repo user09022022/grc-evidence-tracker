@@ -521,6 +521,81 @@ def test_legacy_item_without_framework_still_reports(tmp_path):
     assert ",iso27001,A.8.13," in text
 
 
+# --- Excel export (v0.5) ---------------------------------------------------
+
+openpyxl = pytest.importorskip("openpyxl")
+
+
+def _load_xlsx(path):
+    return openpyxl.load_workbook(path)
+
+
+def test_report_xlsx_has_summary_and_detail_sheets(tmp_path, populated_store):
+    path = str(tmp_path / "report.xlsx")
+    assert report.write_xlsx(populated_store, path, today=TODAY) == path
+    wb = _load_xlsx(path)
+    assert wb.sheetnames == ["Summary", "Detail"]
+
+
+def test_report_xlsx_summary_counts(tmp_path, populated_store):
+    path = str(tmp_path / "report.xlsx")
+    report.write_xlsx(populated_store, path, today=TODAY)
+    ws = _load_xlsx(path)["Summary"]
+    assert "Status Report" in ws["A1"].value
+    assert ws["A2"].value == "Generated 2026-11-16"
+    rows = {row[0].value: row[1].value for row in ws.iter_rows(min_row=4)}
+    assert rows == {
+        "Status": "Count", "requested": 2, "received": 1,
+        "verified": 1, "Total": 4, "Overdue": 2,
+    }
+    # Header and total rows are formatted bold.
+    assert ws["A4"].font.bold is True
+    assert ws["A8"].font.bold is True
+
+
+def test_report_xlsx_detail_rows_match_csv_columns(tmp_path, populated_store):
+    path = str(tmp_path / "report.xlsx")
+    report.write_xlsx(populated_store, path, today=TODAY)
+    ws = _load_xlsx(path)["Detail"]
+    header = [c.value for c in ws[1]]
+    assert header == report.CSV_FIELDS
+    assert ws.max_row == 5  # header + 4 items
+    first = [c.value for c in ws[2]]
+    assert first == [
+        1, "iso27001", "A.8.13", "Information backup",
+        "Backup restore test results", "IT Operations",
+        "2026-11-10", "requested", "yes",
+    ]
+    verified = [c.value for c in ws[4]]
+    assert verified[-1] == "no"  # verified items are never overdue
+    assert ws.freeze_panes == "A2"
+    assert ws.auto_filter.ref == "A1:I5"
+
+
+def test_report_xlsx_detail_includes_soc2_framework(tmp_path, empty_store):
+    core.add_evidence(
+        empty_store, "CC6.1", "Access control matrix", "IT Operations",
+        "2026-11-10", framework="soc2",
+    )
+    path = str(tmp_path / "report.xlsx")
+    report.write_xlsx(empty_store, path, today=TODAY)
+    ws = _load_xlsx(path)["Detail"]
+    row = [c.value for c in ws[2]]
+    assert row[1] == "soc2"
+    assert row[2] == "CC6.1"
+    assert row[3] == "Logical access security"
+
+
+def test_report_xlsx_empty_store(tmp_path, empty_store):
+    path = str(tmp_path / "report.xlsx")
+    report.write_xlsx(empty_store, path, today=TODAY)
+    wb = _load_xlsx(path)
+    rows = {r[0].value: r[1].value for r in wb["Summary"].iter_rows(min_row=4)}
+    assert rows["Total"] == 0
+    assert rows["Overdue"] == 0
+    assert wb["Detail"].max_row == 1  # header only
+
+
 def test_report_html_contents(tmp_path, populated_store):
     path = str(tmp_path / "report.html")
     report.write_html(populated_store, path, today=TODAY)

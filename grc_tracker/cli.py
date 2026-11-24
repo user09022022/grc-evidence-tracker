@@ -105,6 +105,11 @@ def build_parser():
     p_report.add_argument(
         "--out", default=".", help="output directory (default: current directory)",
     )
+    p_report.add_argument(
+        "--format", choices=("all", "csv", "html", "xlsx"), default="all",
+        help="report format to write: csv, html, or xlsx (Excel workbook, "
+             "requires openpyxl); 'all' writes CSV + HTML (default: all)",
+    )
     return parser
 
 
@@ -284,14 +289,24 @@ def cmd_show(args):
 def cmd_report(args):
     store = load_store(args.data)
     os.makedirs(args.out, exist_ok=True)
-    csv_path = os.path.join(args.out, "report.csv")
-    html_path = os.path.join(args.out, "report.html")
-    report_mod.write_csv(store, csv_path)
-    report_mod.write_html(store, html_path)
+    fmt = getattr(args, "format", "all")
+    written = []
+    if fmt in ("all", "csv"):
+        csv_path = os.path.join(args.out, "report.csv")
+        report_mod.write_csv(store, csv_path)
+        written.append(csv_path)
+    if fmt in ("all", "html"):
+        html_path = os.path.join(args.out, "report.html")
+        report_mod.write_html(store, html_path)
+        written.append(html_path)
+    if fmt == "xlsx":
+        xlsx_path = os.path.join(args.out, "report.xlsx")
+        report_mod.write_xlsx(store, xlsx_path)
+        written.append(xlsx_path)
     counts = status_counts(store)
     overdue = sum(1 for i in store["evidence"] if is_overdue(i))
-    print(f"Wrote {csv_path}")
-    print(f"Wrote {html_path}")
+    for path in written:
+        print(f"Wrote {path}")
     print(
         f"Summary: {counts['total']} item(s) — "
         f"requested: {counts['requested']}, received: {counts['received']}, "

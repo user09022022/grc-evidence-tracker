@@ -1,4 +1,4 @@
-"""Report export: CSV detail file and a simple HTML status page."""
+"""Report export: CSV/HTML reports, an Excel workbook, reminder digest."""
 
 import csv
 import html
@@ -102,6 +102,103 @@ def write_html(store, path, today=None):
 """
     with open(path, "w", encoding="utf-8") as fh:
         fh.write(page)
+    return path
+
+
+XLSX_FIELDS = CSV_FIELDS
+
+_XLSX_DETAIL_WIDTHS = {
+    "id": 6, "framework": 12, "control_id": 12, "control_title": 42,
+    "title": 42, "owner": 20, "due_date": 12, "status": 12, "overdue": 10,
+}
+
+
+def write_xlsx(store, path, today=None):
+    """Write a formatted Excel workbook for *store* to *path*.
+
+    The workbook has two sheets: "Summary" (generation date, counts
+    by status, total and overdue count) and "Detail" (one row per
+    evidence item, same columns as the CSV report, with a filter,
+    frozen header row and overdue rows highlighted).
+
+    This is the only report format that needs a third-party package:
+    openpyxl is imported lazily here so the rest of the tool stays
+    standard-library only. Raises ValueError with install guidance
+    when openpyxl is not available.
+    """
+    try:
+        from openpyxl import Workbook
+        from openpyxl.styles import Font, PatternFill
+        from openpyxl.utils import get_column_letter
+    except ImportError:
+        raise ValueError(
+            "Excel export requires the openpyxl package: "
+            "install it with `pip install openpyxl` or "
+            "`pip install .[xlsx]`."
+        ) from None
+    today = today or date.today()
+    counts = status_counts(store)
+    overdue = overdue_items(store, today=today)
+
+    header_font = Font(bold=True, color="FFFFFF")
+    header_fill = PatternFill("solid", fgColor="4472C4")
+    overdue_fill = PatternFill("solid", fgColor="FCE4E4")
+    title_font = Font(bold=True, size=14)
+
+    wb = Workbook()
+
+    summary = wb.active
+    summary.title = "Summary"
+    summary["A1"] = "GRC Evidence Tracker — Status Report"
+    summary["A1"].font = title_font
+    summary["A2"] = f"Generated {today.isoformat()}"
+    summary.append([])
+    summary.append(["Status", "Count"])
+    for cell in summary[4]:
+        cell.font = header_font
+        cell.fill = header_fill
+    for status in ("requested", "received", "verified"):
+        summary.append([status, counts[status]])
+    summary.append(["Total", counts["total"]])
+    summary.append(["Overdue", len(overdue)])
+    for row in (8, 9):
+        for cell in summary[row]:
+            cell.font = Font(bold=True)
+    summary.column_dimensions["A"].width = 16
+    summary.column_dimensions["B"].width = 10
+
+    detail = wb.create_sheet("Detail")
+    detail.append(XLSX_FIELDS)
+    for cell in detail[1]:
+        cell.font = header_font
+        cell.fill = header_fill
+    for item in store["evidence"]:
+        item_overdue = is_overdue(item, today=today)
+        detail.append([
+            item["id"],
+            item_framework(item),
+            item["control_id"],
+            CONTROLS_BY_ID[item["control_id"]]["title"],
+            item["title"],
+            item["owner"],
+            item["due_date"],
+            item["status"],
+            "yes" if item_overdue else "no",
+        ])
+        if item_overdue:
+            for cell in detail[detail.max_row]:
+                cell.fill = overdue_fill
+    for idx, field in enumerate(XLSX_FIELDS, start=1):
+        detail.column_dimensions[get_column_letter(idx)].width = (
+            _XLSX_DETAIL_WIDTHS[field]
+        )
+    detail.freeze_panes = "A2"
+    if store["evidence"]:
+        detail.auto_filter.ref = (
+            f"A1:{get_column_letter(len(XLSX_FIELDS))}{detail.max_row}"
+        )
+
+    wb.save(path)
     return path
 
 
