@@ -461,6 +461,231 @@ def test_update_then_reload_round_trip(tmp_path, populated_store):
     assert core.item_history(item)[0]["field"] == "status"
 
 
+# --- Multi-engagement support (v0.6) --------------------------------------
+
+@pytest.fixture()
+def engagement_store(empty_store):
+    core.add_engagement(
+        empty_store, "acme-iso-2026", "Acme Corp",
+        framework="iso27001", period="2026", today=TODAY,
+    )
+    core.add_engagement(
+        empty_store, "globex-soc2-2026", "Globex",
+        framework="soc2", period="2026-H2", today=TODAY,
+    )
+    core.add_evidence(
+        empty_store, "A.8.13", "Backup restore test results",
+        "IT Operations", "2026-11-10", status="requested",
+        engagement="acme-iso-2026",
+    )
+    core.add_evidence(
+        empty_store, "A.5.1", "Approved policy",
+        "CISO Office", "2026-11-05", status="verified",
+        engagement="acme-iso-2026",
+    )
+    core.add_evidence(
+        empty_store, "CC6.1", "Access control matrix",
+        "IT Operations", "2026-11-10", status="received",
+        framework="soc2", engagement="globex-soc2-2026",
+    )
+    core.add_evidence(
+        empty_store, "A.8.5", "Unassigned MFA export",
+        "IT Operations", "2026-12-01", status="requested",
+    )
+    return empty_store
+
+
+def test_new_store_has_empty_engagements():
+    assert store.new_store()["engagements"] == []
+
+
+def test_add_engagement_records_fields(empty_store):
+    eng = core.add_engagement(
+        empty_store, "acme-2026", "Acme Corp", framework="soc2",
+        period="2026", today=TODAY,
+    )
+    assert eng == {
+        "name": "acme-2026", "client": "Acme Corp", "framework": "soc2",
+        "period": "2026", "created": "2026-11-16",
+    }
+    assert core.find_engagement(empty_store, "acme-2026") == eng
+
+
+def test_add_engagement_rejects_duplicate_name(engagement_store):
+    with pytest.raises(ValueError):
+        core.add_engagement(engagement_store, "acme-iso-2026", "Other")
+
+
+def test_add_engagement_rejects_empty_name_and_client(empty_store):
+    with pytest.raises(ValueError):
+        core.add_engagement(empty_store, "  ", "Acme Corp")
+    with pytest.raises(ValueError):
+        core.add_engagement(empty_store, "acme", "  ")
+
+
+def test_add_engagement_rejects_unknown_framework(empty_store):
+    with pytest.raises(ValueError):
+        core.add_engagement(empty_store, "acme", "Acme", framework="nist")
+
+
+def test_find_engagement_rejects_unknown_name(engagement_store):
+    with pytest.raises(ValueError):
+        core.find_engagement(engagement_store, "nope")
+
+
+def test_add_evidence_records_engagement(engagement_store):
+    item = engagement_store["evidence"][0]
+    assert item["engagement"] == "acme-iso-2026"
+    assert core.item_engagement(item) == "acme-iso-2026"
+    unassigned = engagement_store["evidence"][3]
+    assert core.item_engagement(unassigned) is None
+
+
+def test_add_evidence_rejects_unknown_engagement(engagement_store):
+    with pytest.raises(ValueError):
+        core.add_evidence(
+            engagement_store, "A.8.13", "Nope", "Owner", "2026-12-15",
+            engagement="missing",
+        )
+
+
+def test_add_evidence_rejects_framework_mismatch_with_engagement(engagement_store):
+    with pytest.raises(ValueError):
+        core.add_evidence(
+            engagement_store, "CC6.1", "Nope", "Owner", "2026-12-15",
+            framework="soc2", engagement="acme-iso-2026",
+        )
+
+
+def test_item_engagement_legacy_item_without_key():
+    legacy = {"id": 1, "control_id": "A.8.13"}
+    assert core.item_engagement(legacy) is None
+
+
+def test_scoped_items_filters_by_engagement(engagement_store):
+    scoped = core.scoped_items(engagement_store, engagement="acme-iso-2026")
+    assert [i["title"] for i in scoped] == [
+        "Backup restore test results", "Approved policy",
+    ]
+    assert len(core.scoped_items(engagement_store)) == 4
+    with pytest.raises(ValueError):
+        core.scoped_items(engagement_store, engagement="missing")
+
+
+def test_status_counts_scoped_to_engagement(engagement_store):
+    counts = core.status_counts(engagement_store, engagement="acme-iso-2026")
+    assert counts == {"requested": 1, "received": 0, "verified": 1, "total": 2}
+    assert core.status_counts(engagement_store)["total"] == 4
+
+
+def test_overdue_and_due_within_scoped_to_engagement(engagement_store):
+    overdue = core.overdue_items(
+        engagement_store, today=TODAY, engagement="globex-soc2-2026",
+    )
+    assert [i["title"] for i in overdue] == ["Access control matrix"]
+    due = core.due_within_items(
+        engagement_store, within_days=7, today=TODAY,
+        engagement="acme-iso-2026",
+    )
+    assert [i["title"] for i in due] == ["Backup restore test results"]
+
+
+def test_engagement_summaries_cover_all_and_unassigned(engagement_store):
+    summaries = core.engagement_summaries(engagement_store, today=TODAY)
+    assert [s["engagement"]["name"] if s["engagement"] else None
+            for s in summaries] == [
+        "acme-iso-2026", "globex-soc2-2026", None,
+    ]
+    acme, globex, unassigned = summaries
+    assert acme["total"] == 2 and acme["overdue"] == 1
+    assert acme["counts"] == {"requested": 1, "received": 0, "verified": 1}
+    assert globex["total"] == 1 and globex["overdue"] == 1
+    assert unassigned["total"] == 1 and unassigned["overdue"] == 0
+
+
+def test_engagement_summaries_no_unassigned_entry_when_all_assigned(empty_store):
+    core.add_engagement(empty_store, "acme", "Acme", today=TODAY)
+    core.add_evidence(
+        empty_store, "A.8.13", "Backup", "IT", "2026-12-01",
+        engagement="acme",
+    )
+    summaries = core.engagement_summaries(empty_store, today=TODAY)
+    assert len(summaries) == 1
+    assert summaries[0]["engagement"]["name"] == "acme"
+
+
+def test_legacy_store_without_engagements_key_still_works():
+    legacy = {"version": 1, "evidence": []}
+    assert core.get_engagements(legacy) == []
+    eng = core.add_engagement(legacy, "acme", "Acme", today=TODAY)
+    assert legacy["engagements"] == [eng]
+
+
+def test_report_csv_scoped_and_includes_engagement(tmp_path, engagement_store):
+    path = str(tmp_path / "report.csv")
+    report.write_csv(engagement_store, path, today=TODAY)
+    text = open(path, encoding="utf-8").read()
+    assert ",acme-iso-2026,A.8.13," in text
+    assert ",globex-soc2-2026,CC6.1," in text
+    scoped_path = str(tmp_path / "scoped.csv")
+    report.write_csv(
+        engagement_store, scoped_path, today=TODAY,
+        engagement="acme-iso-2026",
+    )
+    scoped = open(scoped_path, encoding="utf-8").read()
+    assert "Backup restore test results" in scoped
+    assert "Access control matrix" not in scoped
+    assert "Unassigned MFA export" not in scoped
+
+
+def test_report_html_cross_engagement_summary(tmp_path, engagement_store):
+    path = str(tmp_path / "report.html")
+    report.write_html(engagement_store, path, today=TODAY)
+    text = open(path, encoding="utf-8").read()
+    assert "<h2>Engagements</h2>" in text
+    assert "acme-iso-2026" in text
+    assert "Acme Corp" in text
+    assert "globex-soc2-2026" in text
+    assert "Globex" in text
+    assert "(no engagement)" in text
+
+
+def test_report_html_scoped_counts_keep_cross_summary(tmp_path, engagement_store):
+    path = str(tmp_path / "report.html")
+    report.write_html(
+        engagement_store, path, today=TODAY, engagement="acme-iso-2026",
+    )
+    text = open(path, encoding="utf-8").read()
+    assert "Engagement: acme-iso-2026" in text
+    assert "2 evidence item(s)" in text
+    # Cross-engagement summary still covers the other engagement.
+    assert "globex-soc2-2026" in text
+
+
+def test_report_xlsx_scoped_to_engagement(tmp_path, engagement_store):
+    path = str(tmp_path / "report.xlsx")
+    report.write_xlsx(
+        engagement_store, path, today=TODAY, engagement="globex-soc2-2026",
+    )
+    ws = _load_xlsx(path)["Detail"]
+    assert ws.max_row == 2  # header + 1 scoped item
+    row = [c.value for c in ws[2]]
+    assert row[2] == "globex-soc2-2026"
+    assert row[3] == "CC6.1"
+    summary = _load_xlsx(path)["Summary"]
+    rows = {r[0].value: r[1].value for r in summary.iter_rows(min_row=4)}
+    assert rows["Total"] == 1
+
+
+def test_reminder_digest_scoped_to_engagement(engagement_store):
+    text = report.format_reminder_digest(
+        engagement_store, within_days=7, today=TODAY,
+        engagement="globex-soc2-2026",
+    )
+    assert "Access control matrix" in text
+    assert "Backup restore test results" not in text
+
+
 # --- Summaries and reports -------------------------------------------------
 
 def test_status_counts(populated_store):
@@ -497,12 +722,12 @@ def test_report_csv_includes_framework_for_soc2_items(tmp_path, empty_store):
     path = str(tmp_path / "report.csv")
     report.write_csv(empty_store, path, today=TODAY)
     text = open(path, encoding="utf-8").read()
-    assert "id,framework,control_id,control_title" in text
+    assert "id,framework,engagement,control_id,control_title" in text
     soc2_line = next(line for line in text.splitlines() if "CC7.4" in line)
-    assert ",soc2,CC7.4," in soc2_line
+    assert ",soc2,,CC7.4," in soc2_line
     assert "Response to security incidents" in soc2_line
     iso_line = next(line for line in text.splitlines() if "A.5.24" in line)
-    assert ",iso27001,A.5.24," in iso_line
+    assert ",iso27001,,A.5.24," in iso_line
 
 
 def test_legacy_item_without_framework_still_reports(tmp_path):
@@ -518,7 +743,7 @@ def test_legacy_item_without_framework_still_reports(tmp_path):
     path = str(tmp_path / "report.csv")
     report.write_csv(legacy, path, today=TODAY)
     text = open(path, encoding="utf-8").read()
-    assert ",iso27001,A.8.13," in text
+    assert ",iso27001,,A.8.13," in text
 
 
 # --- Excel export (v0.5) ---------------------------------------------------
@@ -562,14 +787,14 @@ def test_report_xlsx_detail_rows_match_csv_columns(tmp_path, populated_store):
     assert ws.max_row == 5  # header + 4 items
     first = [c.value for c in ws[2]]
     assert first == [
-        1, "iso27001", "A.8.13", "Information backup",
+        1, "iso27001", None, "A.8.13", "Information backup",
         "Backup restore test results", "IT Operations",
         "2026-11-10", "requested", "yes",
     ]
     verified = [c.value for c in ws[4]]
     assert verified[-1] == "no"  # verified items are never overdue
     assert ws.freeze_panes == "A2"
-    assert ws.auto_filter.ref == "A1:I5"
+    assert ws.auto_filter.ref == "A1:J5"
 
 
 def test_report_xlsx_detail_includes_soc2_framework(tmp_path, empty_store):
@@ -582,8 +807,9 @@ def test_report_xlsx_detail_includes_soc2_framework(tmp_path, empty_store):
     ws = _load_xlsx(path)["Detail"]
     row = [c.value for c in ws[2]]
     assert row[1] == "soc2"
-    assert row[2] == "CC6.1"
-    assert row[3] == "Logical access security"
+    assert row[2] is None  # no engagement; openpyxl reads "" back as None
+    assert row[3] == "CC6.1"
+    assert row[4] == "Logical access security"
 
 
 def test_report_xlsx_empty_store(tmp_path, empty_store):

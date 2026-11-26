@@ -9,28 +9,35 @@ from .core import (
     days_overdue,
     days_until_due,
     due_within_items,
+    engagement_summaries,
     is_overdue,
+    item_engagement,
     item_framework,
     overdue_items,
+    scoped_items,
     status_counts,
 )
 
 CSV_FIELDS = [
-    "id", "framework", "control_id", "control_title", "title", "owner",
-    "due_date", "status", "overdue",
+    "id", "framework", "engagement", "control_id", "control_title",
+    "title", "owner", "due_date", "status", "overdue",
 ]
 
 
-def write_csv(store, path, today=None):
-    """Write one row per evidence item to *path* (CSV)."""
+def write_csv(store, path, today=None, engagement=None):
+    """Write one row per evidence item to *path* (CSV).
+
+    When *engagement* is given, only that engagement's items appear.
+    """
     today = today or date.today()
     with open(path, "w", newline="", encoding="utf-8") as fh:
         writer = csv.DictWriter(fh, fieldnames=CSV_FIELDS)
         writer.writeheader()
-        for item in store["evidence"]:
+        for item in scoped_items(store, engagement=engagement):
             writer.writerow({
                 "id": item["id"],
                 "framework": item_framework(item),
+                "engagement": item_engagement(item) or "",
                 "control_id": item["control_id"],
                 "control_title": CONTROLS_BY_ID[item["control_id"]]["title"],
                 "title": item["title"],
@@ -42,11 +49,64 @@ def write_csv(store, path, today=None):
     return path
 
 
-def write_html(store, path, today=None):
-    """Write a simple standalone HTML status report to *path*."""
+def _engagement_summary_section(store, today):
+    """HTML for the cross-engagement summary table (v0.6)."""
+    summaries = engagement_summaries(store, today=today)
+    if not summaries:
+        return ""
+    rows = []
+    for entry in summaries:
+        record = entry["engagement"]
+        if record is None:
+            name = "(no engagement)"
+            client = framework = period = ""
+        else:
+            name = record["name"]
+            client = record.get("client", "")
+            framework = record.get("framework", "")
+            period = record.get("period", "")
+        counts = entry["counts"]
+        rows.append(
+            "      <tr>"
+            f"<td>{html.escape(name)}</td>"
+            f"<td>{html.escape(client)}</td>"
+            f"<td>{html.escape(framework)}</td>"
+            f"<td>{html.escape(period)}</td>"
+            f"<td>{entry['total']}</td>"
+            f"<td>{counts['requested']}</td>"
+            f"<td>{counts['received']}</td>"
+            f"<td>{counts['verified']}</td>"
+            f"<td>{entry['overdue']}</td>"
+            "</tr>"
+        )
+    body = "\n".join(rows)
+    return (
+        "  <h2>Engagements</h2>\n"
+        "    <table>\n"
+        "      <tr><th>Engagement</th><th>Client</th><th>Framework</th>"
+        "<th>Period</th><th>Total</th><th>Requested</th><th>Received</th>"
+        "<th>Verified</th><th>Overdue</th></tr>\n"
+        f"{body}\n"
+        "    </table>\n"
+    )
+
+
+def write_html(store, path, today=None, engagement=None):
+    """Write a simple standalone HTML status report to *path*.
+
+    The report always carries a cross-engagement summary (one row per
+    engagement, plus unassigned items when any exist). When
+    *engagement* is given, the status counts and overdue list are
+    scoped to that engagement; the cross-engagement summary still
+    covers the whole store.
+    """
     today = today or date.today()
-    counts = status_counts(store)
-    overdue = overdue_items(store, today=today)
+    counts = status_counts(store, engagement=engagement)
+    overdue = overdue_items(store, today=today, engagement=engagement)
+    engagement_section = _engagement_summary_section(store, today)
+    scope_note = (
+        f" · Engagement: {html.escape(engagement)}" if engagement else ""
+    )
 
     count_rows = "\n".join(
         f"      <tr><td>{html.escape(status)}</td><td>{counts[status]}</td></tr>"
@@ -88,14 +148,14 @@ def write_html(store, path, today=None):
 </head>
 <body>
   <h1>GRC Evidence Tracker — Status Report</h1>
-  <p>Generated {today.isoformat()} · {counts['total']} evidence item(s) · {len(overdue)} overdue</p>
+  <p>Generated {today.isoformat()} · {counts['total']} evidence item(s) · {len(overdue)} overdue{scope_note}</p>
   <h2>Counts by status</h2>
   <table>
     <tr><th>Status</th><th>Count</th></tr>
 {count_rows}
     <tr><td><strong>Total</strong></td><td><strong>{counts['total']}</strong></td></tr>
   </table>
-  <h2>Overdue items</h2>
+{engagement_section}  <h2>Overdue items</h2>
 {overdue_section}
 </body>
 </html>
@@ -108,12 +168,13 @@ def write_html(store, path, today=None):
 XLSX_FIELDS = CSV_FIELDS
 
 _XLSX_DETAIL_WIDTHS = {
-    "id": 6, "framework": 12, "control_id": 12, "control_title": 42,
-    "title": 42, "owner": 20, "due_date": 12, "status": 12, "overdue": 10,
+    "id": 6, "framework": 12, "engagement": 18, "control_id": 12,
+    "control_title": 42, "title": 42, "owner": 20, "due_date": 12,
+    "status": 12, "overdue": 10,
 }
 
 
-def write_xlsx(store, path, today=None):
+def write_xlsx(store, path, today=None, engagement=None):
     """Write a formatted Excel workbook for *store* to *path*.
 
     The workbook has two sheets: "Summary" (generation date, counts
@@ -137,8 +198,9 @@ def write_xlsx(store, path, today=None):
             "`pip install .[xlsx]`."
         ) from None
     today = today or date.today()
-    counts = status_counts(store)
-    overdue = overdue_items(store, today=today)
+    counts = status_counts(store, engagement=engagement)
+    overdue = overdue_items(store, today=today, engagement=engagement)
+    items = scoped_items(store, engagement=engagement)
 
     header_font = Font(bold=True, color="FFFFFF")
     header_fill = PatternFill("solid", fgColor="4472C4")
@@ -172,11 +234,12 @@ def write_xlsx(store, path, today=None):
     for cell in detail[1]:
         cell.font = header_font
         cell.fill = header_fill
-    for item in store["evidence"]:
+    for item in items:
         item_overdue = is_overdue(item, today=today)
         detail.append([
             item["id"],
             item_framework(item),
+            item_engagement(item) or "",
             item["control_id"],
             CONTROLS_BY_ID[item["control_id"]]["title"],
             item["title"],
@@ -193,7 +256,7 @@ def write_xlsx(store, path, today=None):
             _XLSX_DETAIL_WIDTHS[field]
         )
     detail.freeze_panes = "A2"
-    if store["evidence"]:
+    if items:
         detail.auto_filter.ref = (
             f"A1:{get_column_letter(len(XLSX_FIELDS))}{detail.max_row}"
         )
@@ -216,15 +279,18 @@ def _due_label(item, today):
     return f"due in {remaining} days"
 
 
-def format_reminder_digest(store, within_days=7, today=None):
+def format_reminder_digest(store, within_days=7, today=None, engagement=None):
     """Return a plain-text reminder digest grouped by owner.
 
     Covers the same items as `core.due_within_items`: open items that
     are overdue or due within *within_days* days. The text is written
-    to be pasted into an email to the owners who owe evidence.
+    to be pasted into an email to the owners who owe evidence. When
+    *engagement* is given, only that engagement's items are chased.
     """
     today = today or date.today()
-    items = due_within_items(store, within_days=within_days, today=today)
+    items = due_within_items(
+        store, within_days=within_days, today=today, engagement=engagement,
+    )
     lines = [
         "GRC Evidence Tracker — Reminder Digest",
         f"Generated {today.isoformat()} · "
@@ -252,9 +318,12 @@ def format_reminder_digest(store, within_days=7, today=None):
     return "\n".join(lines)
 
 
-def write_reminder_digest(store, path, within_days=7, today=None):
+def write_reminder_digest(store, path, within_days=7, today=None,
+                            engagement=None):
     """Write the reminder digest for *store* to *path* (text)."""
-    text = format_reminder_digest(store, within_days=within_days, today=today)
+    text = format_reminder_digest(
+        store, within_days=within_days, today=today, engagement=engagement,
+    )
     with open(path, "w", encoding="utf-8") as fh:
         fh.write(text)
     return path

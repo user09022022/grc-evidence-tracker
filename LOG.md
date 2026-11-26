@@ -1,5 +1,42 @@
 # Build Log
 
+## 2026-11-25 — v0.6 (Multi-engagement support)
+
+One store no longer means one engagement: a firm running several
+audits at once can keep them apart without juggling JSON files.
+
+**Features**
+- Named engagements — `add-engagement --name --client --framework
+  --period` creates an engagement record (`core.add_engagement`,
+  duplicate/empty names, empty client and unknown framework
+  rejected); `engagements` lists every engagement with its item and
+  overdue counts, plus any unassigned items. The store gains an
+  `engagements` list (store version 2); pre-v0.6 stores load with an
+  empty list and their items are treated as unassigned.
+- Scoped evidence — `add-evidence --engagement NAME` assigns an item
+  to an existing engagement (unknown names rejected; the framework
+  is inherited from the engagement, and an explicitly passed
+  `--framework` that disagrees with it is rejected). Every item
+  records its `engagement` (or none), shown in `list` and `show`.
+- Scoped commands — `list`, `due` (including its reminder digest)
+  and `report` all accept `--engagement NAME`, backed by
+  `core.scoped_items` / scoped `status_counts`, `overdue_items` and
+  `due_within_items`; an unknown name fails cleanly instead of
+  silently returning an empty view.
+- Reports — the CSV and Excel detail gain an `engagement` column,
+  and the HTML report always includes a cross-engagement summary
+  (`core.engagement_summaries`): one row per engagement with client,
+  framework, period, total, by-status and overdue counts, plus a
+  "(no engagement)" row when unassigned items exist. A scoped HTML
+  report still carries the full cross-engagement summary.
+
+**Tests** — pytest suite extended with engagement creation and
+validation, framework inheritance/mismatch, scoping for list/due/
+counts/reports/digest, cross-engagement summaries, legacy-store
+handling, and CLI end-to-end runs for `add-engagement`,
+`engagements`, and the `--engagement` flags:
+**115 passed, 0 failed** (was 85 at v0.5).
+
 ## 2026-11-23 — v0.5 (Excel export)
 
 Status reporting now produces a workbook an engagement team can

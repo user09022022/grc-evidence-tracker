@@ -10,7 +10,7 @@ Built with Python 3 standard library only — no dependencies for the
 core tool. The optional Excel export (v0.5) uses `openpyxl`, installed
 only when you ask for it (`pip install .[xlsx]`).
 
-## Features (v0.5)
+## Features (v0.6)
 
 - **Bundled control catalogues** — 26 ISO 27001:2022 Annex A controls
   spanning all four themes (Organizational, People, Physical,
@@ -40,6 +40,18 @@ only when you ask for it (`pip install .[xlsx]`).
   row per item, same columns as the CSV, with a filter, a frozen
   header row, and overdue rows highlighted). `--format csv` / `html`
   write just that one format; the default writes CSV + HTML.
+- **Multi-engagement support** — one store can hold several named
+  engagements (`add-engagement --name … --client … --framework …
+  --period …`; `engagements` lists them with counts). Evidence is
+  assigned with `add-evidence --engagement NAME` (the framework is
+  inherited from the engagement and must match it when passed
+  explicitly), and `list`, `due`, and `report` all accept
+  `--engagement NAME` to scope their output to one engagement. The
+  CSV and Excel detail gain an `engagement` column, `show` displays
+  the item's engagement, and the HTML report always includes a
+  cross-engagement summary (total / by-status / overdue per
+  engagement, plus unassigned items). Stores from earlier versions
+  load unchanged — their items are simply unassigned.
 - **Local JSON store** — all data lives in one portable `grc_data.json`
   file; no database or account needed.
 
@@ -64,6 +76,9 @@ python3 grc.py --help
 
 ```bash
 grc-tracker init                       # create grc_data.json
+grc-tracker add-engagement --name acme-iso-2026 --client "Acme Corp" \
+    --framework iso27001 --period 2026 # create a named engagement
+grc-tracker engagements                # list engagements with counts
 grc-tracker controls                   # list the ISO 27001 controls
 grc-tracker controls --theme People    # filter by theme
 grc-tracker controls --framework soc2  # list the SOC 2 CC1-CC9 criteria
@@ -74,8 +89,12 @@ grc-tracker add-evidence --control A.8.13 \
 grc-tracker add-evidence --framework soc2 --control CC6.1 \
     --title "Access control matrix" \
     --owner "IT Operations" --due 2026-11-10
+grc-tracker add-evidence --engagement acme-iso-2026 --control A.8.13 \
+    --title "Backup restore test results" \
+    --owner "IT Operations" --due 2026-11-10   # framework inherited
 grc-tracker list                       # list items, overdue flagged with aging
 grc-tracker list --overdue             # only overdue items
+grc-tracker list --engagement acme-iso-2026   # only that engagement's items
 grc-tracker due                        # open items due within 7 days (+ overdue)
 grc-tracker due --days 14              # widen the look-ahead window
 grc-tracker due --out reminders.txt    # also write an owner reminder digest
@@ -84,10 +103,12 @@ grc-tracker update 1 --owner "Security Team" --due 2026-12-05
 grc-tracker show 1                     # one item in full, with its history
 grc-tracker report --out ./reports     # write report.csv + report.html
 grc-tracker report --format xlsx       # write report.xlsx (needs openpyxl)
+grc-tracker report --engagement acme-iso-2026  # scope counts/detail to one engagement
 ```
 
 Use `--data PATH` before the subcommand to keep separate stores
-(e.g. one per engagement).
+(e.g. one per client); within one store, use named engagements
+(v0.6) to keep engagements apart.
 
 ## Example session (real output)
 
@@ -135,11 +156,11 @@ Summary: 4 item(s) — requested: 2, received: 1, verified: 1, overdue: 2
 The generated `report.csv`:
 
 ```csv
-id,framework,control_id,control_title,title,owner,due_date,status,overdue
-1,iso27001,A.8.13,Information backup,Backup restore test results,IT Operations,2026-11-10,requested,yes
-2,iso27001,A.6.3,"Information security awareness, education and training",Security awareness training records,HR,2026-11-12,received,yes
-3,iso27001,A.5.1,Policies for information security,Approved information security policy,CISO Office,2026-11-05,verified,no
-4,iso27001,A.8.5,Secure authentication,MFA configuration export,IT Operations,2026-12-01,requested,no
+id,framework,engagement,control_id,control_title,title,owner,due_date,status,overdue
+1,iso27001,,A.8.13,Information backup,Backup restore test results,IT Operations,2026-11-10,requested,yes
+2,iso27001,,A.6.3,"Information security awareness, education and training",Security awareness training records,HR,2026-11-12,received,yes
+3,iso27001,,A.5.1,Policies for information security,Approved information security policy,CISO Office,2026-11-05,verified,no
+4,iso27001,,A.8.5,Secure authentication,MFA configuration export,IT Operations,2026-12-01,requested,no
 ```
 
 ## Development
@@ -147,7 +168,7 @@ id,framework,control_id,control_title,title,owner,due_date,status,overdue
 ```bash
 python3 -m venv .venv
 .venv/bin/pip install pytest openpyxl
-.venv/bin/python -m pytest     # 85 tests, all passing
+.venv/bin/python -m pytest     # 115 tests, all passing
 ```
 
 Project layout:

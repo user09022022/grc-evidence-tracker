@@ -355,6 +355,205 @@ def test_cli_report_format_csv_writes_only_csv(tmp_path, capsys):
     assert not os.path.exists(os.path.join(out_dir, "report.xlsx"))
 
 
+def test_cli_engagements_end_to_end(tmp_path, capsys):
+    run_cli(tmp_path, "init")
+    code, _ = run_cli(
+        tmp_path, "add-engagement",
+        "--name", "acme-iso-2026", "--client", "Acme Corp",
+        "--framework", "iso27001", "--period", "2026",
+    )
+    assert code == 0
+    out = capsys.readouterr().out
+    assert "acme-iso-2026" in out
+    assert "Acme Corp" in out
+
+    code, _ = run_cli(
+        tmp_path, "add-engagement",
+        "--name", "globex-soc2-2026", "--client", "Globex",
+        "--framework", "soc2", "--period", "2026-H2",
+    )
+    assert code == 0
+    capsys.readouterr()
+
+    # Framework is inherited from the engagement when not passed.
+    code, _ = run_cli(
+        tmp_path, "add-evidence", "--engagement", "globex-soc2-2026",
+        "--control", "CC6.1", "--title", "Access control matrix",
+        "--owner", "IT Operations", "--due", "2026-12-01",
+    )
+    assert code == 0
+    out = capsys.readouterr().out
+    assert "[soc2/CC6.1]" in out
+    assert "engagement: globex-soc2-2026" in out
+
+    code, _ = run_cli(
+        tmp_path, "add-evidence", "--engagement", "acme-iso-2026",
+        "--control", "A.8.13", "--title", "Backup policy",
+        "--owner", "IT Operations", "--due", "2026-12-01",
+    )
+    assert code == 0
+    capsys.readouterr()
+
+    code, _ = run_cli(tmp_path, "engagements")
+    assert code == 0
+    out = capsys.readouterr().out
+    assert "acme-iso-2026" in out
+    assert "globex-soc2-2026" in out
+    assert "1 item(s)" in out
+
+    code, _ = run_cli(tmp_path, "list", "--engagement", "acme-iso-2026")
+    assert code == 0
+    out = capsys.readouterr().out
+    assert "Backup policy" in out
+    assert "Access control matrix" not in out
+    assert "1 item(s)" in out
+
+    code, _ = run_cli(tmp_path, "list")
+    assert code == 0
+    out = capsys.readouterr().out
+    assert "Backup policy" in out
+    assert "Access control matrix" in out
+
+
+def test_cli_add_engagement_duplicate_fails_cleanly(tmp_path, capsys):
+    run_cli(tmp_path, "init")
+    run_cli(
+        tmp_path, "add-engagement",
+        "--name", "acme", "--client", "Acme Corp",
+    )
+    capsys.readouterr()
+    code, _ = run_cli(
+        tmp_path, "add-engagement",
+        "--name", "acme", "--client", "Other",
+    )
+    assert code == 1
+    assert "Error" in capsys.readouterr().err
+
+
+def test_cli_add_evidence_unknown_engagement_fails_cleanly(tmp_path, capsys):
+    run_cli(tmp_path, "init")
+    capsys.readouterr()
+    code, _ = run_cli(
+        tmp_path, "add-evidence", "--engagement", "missing",
+        "--control", "A.8.13", "--title", "Backup policy",
+        "--owner", "IT Operations", "--due", "2026-12-01",
+    )
+    assert code == 1
+    assert "Error" in capsys.readouterr().err
+
+
+def test_cli_add_evidence_framework_mismatch_fails_cleanly(tmp_path, capsys):
+    run_cli(tmp_path, "init")
+    run_cli(
+        tmp_path, "add-engagement",
+        "--name", "acme-iso", "--client", "Acme", "--framework", "iso27001",
+    )
+    capsys.readouterr()
+    code, _ = run_cli(
+        tmp_path, "add-evidence", "--engagement", "acme-iso",
+        "--framework", "soc2",
+        "--control", "CC6.1", "--title", "Access matrix",
+        "--owner", "IT Operations", "--due", "2026-12-01",
+    )
+    assert code == 1
+    assert "Error" in capsys.readouterr().err
+
+
+def test_cli_list_unknown_engagement_fails_cleanly(tmp_path, capsys):
+    run_cli(tmp_path, "init")
+    capsys.readouterr()
+    code, _ = run_cli(tmp_path, "list", "--engagement", "missing")
+    assert code == 1
+    assert "Error" in capsys.readouterr().err
+
+
+def test_cli_due_scoped_to_engagement(tmp_path, capsys):
+    run_cli(tmp_path, "init")
+    run_cli(
+        tmp_path, "add-engagement", "--name", "acme", "--client", "Acme",
+    )
+    run_cli(
+        tmp_path, "add-engagement", "--name", "other", "--client", "Other",
+    )
+    run_cli(
+        tmp_path, "add-evidence", "--engagement", "acme",
+        "--control", "A.8.13", "--title", "Acme overdue",
+        "--owner", "IT Operations", "--due", _iso(-2),
+    )
+    run_cli(
+        tmp_path, "add-evidence", "--engagement", "other",
+        "--control", "A.8.15", "--title", "Other overdue",
+        "--owner", "HR", "--due", _iso(-2),
+    )
+    capsys.readouterr()
+    code, _ = run_cli(tmp_path, "due", "--engagement", "acme")
+    assert code == 0
+    out = capsys.readouterr().out
+    assert "Acme overdue" in out
+    assert "Other overdue" not in out
+
+
+def test_cli_report_scoped_to_engagement(tmp_path, capsys):
+    run_cli(tmp_path, "init")
+    run_cli(
+        tmp_path, "add-engagement", "--name", "acme", "--client", "Acme",
+    )
+    run_cli(
+        tmp_path, "add-evidence", "--engagement", "acme",
+        "--control", "A.8.13", "--title", "Acme item",
+        "--owner", "IT Operations", "--due", "2026-12-01",
+    )
+    run_cli(
+        tmp_path, "add-evidence",
+        "--control", "A.8.15", "--title", "Unassigned item",
+        "--owner", "HR", "--due", "2026-12-01",
+    )
+    capsys.readouterr()
+    out_dir = str(tmp_path / "out")
+    code, _ = run_cli(
+        tmp_path, "report", "--out", out_dir, "--engagement", "acme",
+    )
+    assert code == 0
+    out = capsys.readouterr().out
+    assert "Summary: 1 item(s)" in out
+    csv_text = open(
+        os.path.join(out_dir, "report.csv"), encoding="utf-8",
+    ).read()
+    assert "Acme item" in csv_text
+    assert "Unassigned item" not in csv_text
+    html_text = open(
+        os.path.join(out_dir, "report.html"), encoding="utf-8",
+    ).read()
+    assert "<h2>Engagements</h2>" in html_text
+    assert "acme" in html_text
+    assert "(no engagement)" in html_text
+
+
+def test_cli_show_includes_engagement(tmp_path, capsys):
+    run_cli(tmp_path, "init")
+    run_cli(
+        tmp_path, "add-engagement", "--name", "acme", "--client", "Acme",
+    )
+    run_cli(
+        tmp_path, "add-evidence", "--engagement", "acme",
+        "--control", "A.8.13", "--title", "Backup policy",
+        "--owner", "IT Operations", "--due", "2026-12-01",
+    )
+    capsys.readouterr()
+    code, _ = run_cli(tmp_path, "show", "1")
+    assert code == 0
+    out = capsys.readouterr().out
+    assert "Engagement: acme" in out
+
+
+def test_cli_engagements_empty_store(tmp_path, capsys):
+    run_cli(tmp_path, "init")
+    capsys.readouterr()
+    code, _ = run_cli(tmp_path, "engagements")
+    assert code == 0
+    assert "No engagements." in capsys.readouterr().out
+
+
 def test_cli_add_before_init_fails_cleanly(tmp_path, capsys):
     code, _ = run_cli(
         tmp_path, "add-evidence",

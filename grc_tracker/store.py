@@ -4,12 +4,12 @@ import json
 import os
 
 DEFAULT_PATH = "grc_data.json"
-STORE_VERSION = 1
+STORE_VERSION = 2
 
 
 def new_store():
     """Return an empty store structure."""
-    return {"version": STORE_VERSION, "evidence": []}
+    return {"version": STORE_VERSION, "evidence": [], "engagements": []}
 
 
 def init_store(path):
@@ -34,7 +34,13 @@ def load_store(path):
             f"No data store at {path!r}. Run `init` first."
         )
     with open(path, "r", encoding="utf-8") as fh:
-        return json.load(fh)
+        store = json.load(fh)
+    # Stores written before v0.6 have no "engagements" key, and stores
+    # written before v0.1's shape settled may lack "evidence"; fill in
+    # empty defaults so the rest of the tool can rely on both keys.
+    store.setdefault("evidence", [])
+    store.setdefault("engagements", [])
+    return store
 
 
 def save_store(path, store):

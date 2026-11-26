@@ -15,14 +15,20 @@ from .controls_data import (
 )
 from .core import (
     STATUSES,
+    add_engagement,
     add_evidence,
     days_overdue,
     days_until_due,
     due_within_items,
+    engagement_summaries,
+    find_engagement,
     find_item,
+    get_engagements,
     is_overdue,
+    item_engagement,
     item_framework,
     item_history,
+    scoped_items,
     status_counts,
     update_evidence,
 )
@@ -42,6 +48,22 @@ def build_parser():
 
     sub.add_parser("init", help="create a new local JSON data store")
 
+    p_add_eng = sub.add_parser(
+        "add-engagement", help="create a named engagement in the store",
+    )
+    p_add_eng.add_argument("--name", required=True, help="engagement name (unique)")
+    p_add_eng.add_argument("--client", required=True, help="client name")
+    p_add_eng.add_argument(
+        "--framework", choices=FRAMEWORKS, default=DEFAULT_FRAMEWORK,
+        help=f"framework for this engagement (default: {DEFAULT_FRAMEWORK})",
+    )
+    p_add_eng.add_argument(
+        "--period", default="",
+        help="engagement period, e.g. '2026' or '2026-Q4' (optional)",
+    )
+
+    sub.add_parser("engagements", help="list named engagements with counts")
+
     p_controls = sub.add_parser("controls", help="list bundled controls")
     p_controls.add_argument(
         "--framework", choices=FRAMEWORKS, default=DEFAULT_FRAMEWORK,
@@ -55,8 +77,14 @@ def build_parser():
 
     p_add = sub.add_parser("add-evidence", help="record an evidence request")
     p_add.add_argument(
-        "--framework", choices=FRAMEWORKS, default=DEFAULT_FRAMEWORK,
-        help=f"framework the control belongs to (default: {DEFAULT_FRAMEWORK})",
+        "--framework", choices=FRAMEWORKS, default=None,
+        help="framework the control belongs to "
+             f"(default: {DEFAULT_FRAMEWORK}, or the engagement's "
+             "framework when --engagement is given)",
+    )
+    p_add.add_argument(
+        "--engagement", default=None,
+        help="named engagement this item belongs to (must already exist)",
     )
     p_add.add_argument("--control", required=True, help="control id, e.g. A.8.13 or CC6.1")
     p_add.add_argument("--title", required=True, help="evidence item title")
@@ -71,6 +99,10 @@ def build_parser():
     p_list.add_argument(
         "--overdue", action="store_true", help="only show overdue items",
     )
+    p_list.add_argument(
+        "--engagement", default=None,
+        help="only show items from this named engagement",
+    )
 
     p_due = sub.add_parser(
         "due", help="list open items due within N days (including overdue)",
@@ -82,6 +114,10 @@ def build_parser():
     p_due.add_argument(
         "--out", default=None,
         help="also write a reminder digest for owners to this text file",
+    )
+    p_due.add_argument(
+        "--engagement", default=None,
+        help="only show items from this named engagement",
     )
 
     p_update = sub.add_parser(
@@ -110,6 +146,11 @@ def build_parser():
         help="report format to write: csv, html, or xlsx (Excel workbook, "
              "requires openpyxl); 'all' writes CSV + HTML (default: all)",
     )
+    p_report.add_argument(
+        "--engagement", default=None,
+        help="scope counts and detail to this named engagement "
+             "(the HTML report still includes the cross-engagement summary)",
+    )
     return parser
 
 
@@ -118,6 +159,51 @@ def cmd_init(args):
         print(f"Created data store: {args.data}")
     else:
         print(f"Data store already exists: {args.data} (left unchanged)")
+    return 0
+
+
+def cmd_add_engagement(args):
+    store = load_store(args.data)
+    engagement = add_engagement(
+        store,
+        name=args.name,
+        client=args.client,
+        framework=args.framework,
+        period=args.period,
+    )
+    save_store(args.data, store)
+    period = f", period: {engagement['period']}" if engagement["period"] else ""
+    print(
+        f"Added engagement {engagement['name']!r}: "
+        f"client: {engagement['client']}, "
+        f"framework: {engagement['framework']}{period}"
+    )
+    return 0
+
+
+def cmd_engagements(args):
+    store = load_store(args.data)
+    engagements = get_engagements(store)
+    if not engagements and not store["evidence"]:
+        print("No engagements.")
+        return 0
+    today = date.today()
+    for entry in engagement_summaries(store, today=today):
+        record = entry["engagement"]
+        if record is None:
+            print(
+                f"(no engagement) — {entry['total']} item(s), "
+                f"{entry['overdue']} overdue"
+            )
+        else:
+            period = f" | period: {record['period']}" if record.get("period") else ""
+            print(
+                f"{record['name']} | client: {record['client']} | "
+                f"framework: {record['framework']}{period} | "
+                f"{entry['total']} item(s), {entry['overdue']} overdue"
+            )
+    if not engagements:
+        print("No engagements.")
     return 0
 
 
@@ -143,6 +229,14 @@ def cmd_controls(args):
 
 def cmd_add_evidence(args):
     store = load_store(args.data)
+    framework = args.framework
+    engagement = getattr(args, "engagement", None)
+    if engagement is not None:
+        record = find_engagement(store, engagement)
+        if framework is None:
+            framework = record["framework"]
+    if framework is None:
+        framework = DEFAULT_FRAMEWORK
     item = add_evidence(
         store,
         control_id=args.control,
@@ -150,13 +244,18 @@ def cmd_add_evidence(args):
         owner=args.owner,
         due_date=args.due,
         status=args.status,
-        framework=args.framework,
+        framework=framework,
+        engagement=engagement,
     )
     save_store(args.data, store)
+    eng_note = (
+        f", engagement: {item['engagement']}" if item.get("engagement") else ""
+    )
     print(
         f"Added evidence #{item['id']}: [{item['framework']}/{item['control_id']}] "
         f"{item['title']} "
-        f"(owner: {item['owner']}, due: {item['due_date']}, status: {item['status']})"
+        f"(owner: {item['owner']}, due: {item['due_date']}, "
+        f"status: {item['status']}{eng_note})"
     )
     return 0
 
@@ -164,7 +263,8 @@ def cmd_add_evidence(args):
 def cmd_list(args):
     store = load_store(args.data)
     today = date.today()
-    items = store["evidence"]
+    engagement = getattr(args, "engagement", None)
+    items = scoped_items(store, engagement=engagement)
     if args.overdue:
         items = [i for i in items if is_overdue(i, today=today)]
     if not items:
@@ -178,11 +278,13 @@ def cmd_list(args):
             unit = "day" if aged == 1 else "days"
             flag = f"  ** OVERDUE ({aged} {unit} overdue) **"
             overdue_count += 1
+        eng = item_engagement(item)
+        eng_part = f" | engagement: {eng}" if eng else ""
         print(
             f"#{item['id']:<3} [{item_framework(item)}/{item['control_id']}] "
             f"{item['title']} | "
             f"owner: {item['owner']} | due: {item['due_date']} | "
-            f"status: {item['status']}{flag}"
+            f"status: {item['status']}{eng_part}{flag}"
         )
     print(f"\n{len(items)} item(s), {overdue_count} overdue")
     return 0
@@ -191,10 +293,14 @@ def cmd_list(args):
 def cmd_due(args):
     store = load_store(args.data)
     today = date.today()
-    items = due_within_items(store, within_days=args.days, today=today)
+    engagement = getattr(args, "engagement", None)
+    items = due_within_items(
+        store, within_days=args.days, today=today, engagement=engagement,
+    )
     if args.out:
         report_mod.write_reminder_digest(
             store, args.out, within_days=args.days, today=today,
+            engagement=engagement,
         )
     if not items:
         print(f"No items due within {args.days} day(s).")
@@ -260,6 +366,7 @@ def cmd_show(args):
     )
     print(f"  Control:   {item['control_id']} — {control_title}")
     print(f"  Framework: {framework}")
+    print(f"  Engagement: {item_engagement(item) or '(none)'}")
     print(f"  Title:     {item['title']}")
     print(f"  Owner:     {item['owner']}")
     print(f"  Due:       {item['due_date']}")
@@ -290,21 +397,24 @@ def cmd_report(args):
     store = load_store(args.data)
     os.makedirs(args.out, exist_ok=True)
     fmt = getattr(args, "format", "all")
+    engagement = getattr(args, "engagement", None)
     written = []
     if fmt in ("all", "csv"):
         csv_path = os.path.join(args.out, "report.csv")
-        report_mod.write_csv(store, csv_path)
+        report_mod.write_csv(store, csv_path, engagement=engagement)
         written.append(csv_path)
     if fmt in ("all", "html"):
         html_path = os.path.join(args.out, "report.html")
-        report_mod.write_html(store, html_path)
+        report_mod.write_html(store, html_path, engagement=engagement)
         written.append(html_path)
     if fmt == "xlsx":
         xlsx_path = os.path.join(args.out, "report.xlsx")
-        report_mod.write_xlsx(store, xlsx_path)
+        report_mod.write_xlsx(store, xlsx_path, engagement=engagement)
         written.append(xlsx_path)
-    counts = status_counts(store)
-    overdue = sum(1 for i in store["evidence"] if is_overdue(i))
+    counts = status_counts(store, engagement=engagement)
+    overdue = sum(
+        1 for i in scoped_items(store, engagement=engagement) if is_overdue(i)
+    )
     for path in written:
         print(f"Wrote {path}")
     print(
@@ -317,6 +427,8 @@ def cmd_report(args):
 
 COMMANDS = {
     "init": cmd_init,
+    "add-engagement": cmd_add_engagement,
+    "engagements": cmd_engagements,
     "controls": cmd_controls,
     "add-evidence": cmd_add_evidence,
     "list": cmd_list,
