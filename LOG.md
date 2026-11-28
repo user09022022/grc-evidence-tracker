@@ -1,5 +1,43 @@
 # Build Log
 
+## 2026-11-27 — v0.7 (Web dashboard)
+
+The tracker can now be watched in a browser during an engagement
+meeting instead of re-running reports.
+
+**Features**
+- Read-only local dashboard — new `grc_tracker/dashboard.py` served
+  with `http.server` (standard library only, `ThreadingHTTPServer`):
+  counts by status, an overdue table (oldest due first, with aging
+  in days), and per-control coverage. All user text is HTML-escaped.
+- `serve` command (alias `dashboard`) — `--host` (default
+  127.0.0.1), `--port` (default 8000) and `--engagement NAME` to
+  scope every view; the store, engagement, port and refresh values
+  are all validated before the server blocks, so bad input fails
+  cleanly instead of hanging. Non-GET requests are refused with
+  405 — the dashboard can never change the store — and unknown
+  paths return 404.
+- Auto-refresh from the JSON store — the handler re-reads the store
+  from disk on every request (no cached state), and the page carries
+  a `<meta http-equiv="refresh">` tag (`--refresh` seconds, default
+  30; 0 disables it), so evidence added with the CLI appears on the
+  next refresh without a server restart. A store that disappears
+  mid-run is reported as a 500 page, not a crash.
+- Per-control coverage — `core.control_coverage` returns one entry
+  for every bundled control (all 59 ISO 27001 + SOC 2 controls, in
+  catalogue order) with total / by-status / overdue counts and a
+  `covered` flag, scoped by `--engagement` like the other views;
+  the dashboard summarises it as "N of 59 controls have evidence
+  mapped" with a row per covered control.
+
+**Tests** — pytest suite extended with a new `tests/test_dashboard.py`
+(coverage counts, uncovered controls and engagement scoping;
+rendering of counts/overdue/coverage, empty store, auto-refresh
+meta tag, HTML escaping and scoping; and real HTTP runs against an
+ephemeral-port server covering 200/404/405, per-request store
+re-reads and the missing-store 500) plus CLI validation tests for
+`serve`: **136 passed, 0 failed** (was 115 at v0.6).
+
 ## 2026-11-25 — v0.6 (Multi-engagement support)
 
 One store no longer means one engagement: a firm running several

@@ -10,7 +10,7 @@ Built with Python 3 standard library only — no dependencies for the
 core tool. The optional Excel export (v0.5) uses `openpyxl`, installed
 only when you ask for it (`pip install .[xlsx]`).
 
-## Features (v0.6)
+## Features (v0.7)
 
 - **Bundled control catalogues** — 26 ISO 27001:2022 Annex A controls
   spanning all four themes (Organizational, People, Physical,
@@ -52,6 +52,17 @@ only when you ask for it (`pip install .[xlsx]`).
   cross-engagement summary (total / by-status / overdue per
   engagement, plus unassigned items). Stores from earlier versions
   load unchanged — their items are simply unassigned.
+- **Web dashboard** — `serve` (alias `dashboard`) runs a read-only
+  local dashboard on `http.server` (standard library only): counts by
+  status, an overdue table with aging, and per-control coverage
+  (`core.control_coverage` — how many of the 59 bundled controls have
+  evidence mapped, with totals by status for every covered control).
+  The page auto-refreshes in the browser (`--refresh` seconds,
+  default 30; 0 disables it) and the server re-reads the JSON store
+  on every request, so CLI changes appear without a restart. It is
+  strictly read-only — non-GET requests are refused with 405 — binds
+  to `127.0.0.1:8000` by default (`--host` / `--port`), and accepts
+  `--engagement NAME` to scope every view to one engagement.
 - **Local JSON store** — all data lives in one portable `grc_data.json`
   file; no database or account needed.
 
@@ -104,6 +115,9 @@ grc-tracker show 1                     # one item in full, with its history
 grc-tracker report --out ./reports     # write report.csv + report.html
 grc-tracker report --format xlsx       # write report.xlsx (needs openpyxl)
 grc-tracker report --engagement acme-iso-2026  # scope counts/detail to one engagement
+grc-tracker serve                      # read-only dashboard at http://127.0.0.1:8000/
+grc-tracker serve --port 9000 --refresh 10     # custom port, 10s auto-refresh
+grc-tracker serve --engagement acme-iso-2026   # dashboard scoped to one engagement
 ```
 
 Use `--data PATH` before the subcommand to keep separate stores
@@ -168,7 +182,7 @@ id,framework,engagement,control_id,control_title,title,owner,due_date,status,ove
 ```bash
 python3 -m venv .venv
 .venv/bin/pip install pytest openpyxl
-.venv/bin/python -m pytest     # 115 tests, all passing
+.venv/bin/python -m pytest     # 136 tests, all passing
 ```
 
 Project layout:
@@ -182,7 +196,8 @@ grc_tracker/
     controls_data.py    bundled ISO 27001 Annex A + SOC 2 CC1-CC9 catalogues
     store.py            JSON data store load/save
     report.py           CSV/HTML/XLSX report export + reminder digest
-tests/                  pytest suite (core logic + CLI end-to-end)
+    dashboard.py        read-only web dashboard (http.server, auto-refresh)
+tests/                  pytest suite (core logic + CLI end-to-end + dashboard)
 ```
 
 See [ROADMAP.md](ROADMAP.md) for planned increments and [LOG.md](LOG.md)

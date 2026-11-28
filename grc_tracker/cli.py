@@ -5,6 +5,7 @@ import os
 import sys
 from datetime import date
 
+from . import dashboard as dashboard_mod
 from . import report as report_mod
 from .controls_data import (
     CONTROLS_BY_ID,
@@ -150,6 +151,28 @@ def build_parser():
         "--engagement", default=None,
         help="scope counts and detail to this named engagement "
              "(the HTML report still includes the cross-engagement summary)",
+    )
+
+    p_serve = sub.add_parser(
+        "serve", aliases=["dashboard"],
+        help="serve a read-only local web dashboard (auto-refreshing)",
+    )
+    p_serve.add_argument(
+        "--host", default=dashboard_mod.DEFAULT_HOST,
+        help=f"interface to bind (default: {dashboard_mod.DEFAULT_HOST})",
+    )
+    p_serve.add_argument(
+        "--port", type=int, default=dashboard_mod.DEFAULT_PORT,
+        help=f"port to serve on (default: {dashboard_mod.DEFAULT_PORT})",
+    )
+    p_serve.add_argument(
+        "--refresh", type=int, default=dashboard_mod.DEFAULT_REFRESH,
+        help="browser auto-refresh interval in seconds; 0 disables it "
+             f"(default: {dashboard_mod.DEFAULT_REFRESH})",
+    )
+    p_serve.add_argument(
+        "--engagement", default=None,
+        help="scope the dashboard to this named engagement",
     )
     return parser
 
@@ -425,6 +448,34 @@ def cmd_report(args):
     return 0
 
 
+def cmd_serve(args):
+    # Validate everything before blocking in serve_forever: the store
+    # must exist, the engagement (if any) must be known, and the port
+    # and refresh values must be in range.
+    store = load_store(args.data)
+    if getattr(args, "engagement", None) is not None:
+        find_engagement(store, args.engagement)
+    server = dashboard_mod.create_server(
+        args.data,
+        host=args.host,
+        port=args.port,
+        refresh=args.refresh,
+        engagement=getattr(args, "engagement", None),
+    )
+    host, port = server.server_address[:2]
+    print(
+        f"Serving GRC dashboard at http://{host}:{port}/ "
+        f"(data: {args.data}; Ctrl-C to stop)"
+    )
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        print("\nDashboard stopped.")
+    finally:
+        server.server_close()
+    return 0
+
+
 COMMANDS = {
     "init": cmd_init,
     "add-engagement": cmd_add_engagement,
@@ -436,6 +487,8 @@ COMMANDS = {
     "update": cmd_update,
     "show": cmd_show,
     "report": cmd_report,
+    "serve": cmd_serve,
+    "dashboard": cmd_serve,
 }
 
 

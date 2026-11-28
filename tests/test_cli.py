@@ -554,6 +554,36 @@ def test_cli_engagements_empty_store(tmp_path, capsys):
     assert "No engagements." in capsys.readouterr().out
 
 
+def test_cli_serve_before_init_fails_cleanly(tmp_path, capsys):
+    code, _ = run_cli(tmp_path, "serve")
+    assert code == 1
+    assert "Error" in capsys.readouterr().err
+
+
+def test_cli_serve_rejects_bad_port(tmp_path, capsys):
+    run_cli(tmp_path, "init")
+    capsys.readouterr()
+    code, _ = run_cli(tmp_path, "serve", "--port", "70000")
+    assert code == 1
+    assert "Error" in capsys.readouterr().err
+
+
+def test_cli_serve_rejects_negative_refresh(tmp_path, capsys):
+    run_cli(tmp_path, "init")
+    capsys.readouterr()
+    code, _ = run_cli(tmp_path, "serve", "--refresh", "-1")
+    assert code == 1
+    assert "Error" in capsys.readouterr().err
+
+
+def test_cli_serve_rejects_unknown_engagement(tmp_path, capsys):
+    run_cli(tmp_path, "init")
+    capsys.readouterr()
+    code, _ = run_cli(tmp_path, "serve", "--engagement", "missing")
+    assert code == 1
+    assert "Error" in capsys.readouterr().err
+
+
 def test_cli_add_before_init_fails_cleanly(tmp_path, capsys):
     code, _ = run_cli(
         tmp_path, "add-evidence",

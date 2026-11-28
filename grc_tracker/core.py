@@ -2,7 +2,7 @@
 
 from datetime import date, timedelta
 
-from .controls_data import DEFAULT_FRAMEWORK, FRAMEWORKS, controls_by_id
+from .controls_data import ALL_CONTROLS, DEFAULT_FRAMEWORK, FRAMEWORKS, controls_by_id
 
 STATUSES = ("requested", "received", "verified")
 
@@ -345,6 +345,39 @@ def due_within_items(store, within_days=7, today=None, engagement=None):
         if i["status"] != "verified" and parse_date(i["due_date"]) <= cutoff
     ]
     return sorted(items, key=lambda i: i["due_date"])
+
+
+def control_coverage(store, today=None, engagement=None):
+    """Return per-control coverage for every bundled control.
+
+    One entry per control in both catalogues (ISO 27001 first, then
+    SOC 2, each in catalogue order), whether or not any evidence maps
+    to it — an uncovered control is exactly what a coverage view must
+    surface. Each entry is a dict with the control record, ``total``
+    and by-status ``counts``, an ``overdue`` count, and ``covered``
+    (True when at least one item maps to the control). When
+    *engagement* is given, only that engagement's items count.
+    Raises ValueError for an unknown engagement name.
+    """
+    today = today or date.today()
+    items = scoped_items(store, engagement=engagement)
+    by_control = {}
+    for item in items:
+        by_control.setdefault(item["control_id"], []).append(item)
+    coverage = []
+    for control in ALL_CONTROLS:
+        mapped = by_control.get(control["id"], [])
+        counts = {status: 0 for status in STATUSES}
+        for item in mapped:
+            counts[item["status"]] = counts.get(item["status"], 0) + 1
+        coverage.append({
+            "control": control,
+            "total": len(mapped),
+            "counts": counts,
+            "overdue": sum(1 for i in mapped if is_overdue(i, today=today)),
+            "covered": bool(mapped),
+        })
+    return coverage
 
 
 def status_counts(store, engagement=None):
